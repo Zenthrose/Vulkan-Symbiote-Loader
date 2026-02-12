@@ -252,8 +252,14 @@ std::string VulkanSymbioteEngine::generate(const std::string& prompt, uint32_t m
 
         hidden_states_ = hidden.value();
 
+        // Check battery status periodically during generation
+        if (i % 5 == 0) {
+            check_battery_status();
+        }
+        
         for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
-            schedule_prefetch(layer, 3);
+            // Use dynamic prefetch lookahead based on power profile
+            schedule_prefetch(layer, prefetch_lookahead_);
 
             auto layer_out = forward_layer(hidden_states_, layer);
             if (!layer_out.has_value()) {
@@ -933,3 +939,138 @@ ExpectedVoid VulkanSymbioteEngine::download_from_gpu(VkBuffer buffer, std::vecto
 }
 
 } // namespace vk_symbiote
+
+// Power Management Implementation
+
+void VulkanSymbioteEngine::detect_power_source() {
+    check_battery_status();
+}
+
+void VulkanSymbioteEngine::check_battery_status() {
+    uint64_t current_time = get_current_time_ms();
+    
+    // Check battery at intervals to avoid excessive file reads
+    if (current_time - last_battery_check_ < battery_check_interval_ms_) {
+        return;
+    }
+    last_battery_check_ = current_time;
+    
+    // Try to read battery status from /sys/class/power_supply/BAT0/
+    bool battery_detected = false;
+    
+    // Check for standard Linux battery interface
+    std::ifstream present_file("/sys/class/power_supply/BAT0/present");
+    if (present_file.is_open()) {
+        int present = 0;
+        present_file >> present;
+        if (present == 1) {
+            battery_detected = true;
+        }
+    }
+    
+    if (battery_detected) {
+        // Check if AC is connected
+        bool ac_connected = read_ac_connected();
+        on_battery_ = !ac_connected;
+    } else {
+        // Check environment variable fallback
+        const char* env_battery = std::getenv("VK_SYMBIOTE_BATTERY");
+        if (env_battery) {
+            on_battery_ = (std::string(env_battery) == "1" || 
+                          std::string(env_battery) == "true" ||
+                          std::string(env_battery) == "yes");
+        }
+    }
+    
+    // Auto-apply power settings based on battery status
+    if (on_battery_ && power_profile_ == PowerProfile::HIGH_PERFORMANCE) {
+        set_power_profile(PowerProfile::POWER_SAVER);
+        std::cout << "[Power] Battery detected, switching to power-saver mode" << std::endl;
+    } else if (!on_battery_ && power_profile_ == PowerProfile::POWER_SAVER) {
+        set_power_profile(PowerProfile::BALANCED);
+        std::cout << "[Power] AC power connected, switching to balanced mode" << std::endl;
+    }
+}
+
+float VulkanSymbioteEngine::read_battery_capacity() {
+    std::ifstream capacity_file("/sys/class/power_supply/BAT0/capacity");
+    if (capacity_file.is_open()) {
+        float capacity = 0.0f;
+        capacity_file >> capacity;
+        return capacity / 100.0f; // Return as fraction (0.0 - 1.0)
+    }
+    return -1.0f; // Unknown
+}
+
+bool VulkanSymbioteEngine::read_ac_connected() {
+    std::ifstream status_file("/sys/class/power_supply/AC/online");
+    if (status_file.is_open()) {
+        int online = 0;
+        status_file >> online;
+        return online == 1;
+    }
+    
+    // Alternative: check battery status
+    std::ifstream bat_status_file("/sys/class/power_supply/BAT0/status");
+    if (bat_status_file.is_open()) {
+        std::string status;
+        bat_status_file >> status;
+        // If status is "Charging" or "Full", AC is connected
+        return status == "Charging" || status == "Full";
+    }
+    
+    return true; // Assume AC connected if unknown
+}
+
+void VulkanSymbioteEngine::set_power_profile(PowerProfile profile) {
+    power_profile_ = profile;
+    apply_power_settings();
+}
+
+void VulkanSymbioteEngine::apply_power_settings() {
+    switch (power_profile_) {
+        case PowerProfile::HIGH_PERFORMANCE:
+            // Maximum performance settings
+            set_workgroup_size(256, 1, 1);
+            set_prefetch_lookahead(5);
+            enable_profiling(true);
+            break;
+            
+        case PowerProfile::BALANCED:
+            // Balanced settings
+            set_workgroup_size(128, 1, 1);
+            set_prefetch_lookahead(3);
+            enable_profiling(true);
+            break;
+            
+        case PowerProfile::POWER_SAVER:
+            // Battery-optimized settings
+            set_workgroup_size(64, 1, 1);      // Smaller workgroups = less power
+            set_prefetch_lookahead(1);          // Reduce prefetch memory pressure
+            enable_profiling(false);            // Disable profiling overhead
+            break;
+    }
+    
+    std::cout << "[Power] Applied profile: " << 
+        (power_profile_ == PowerProfile::HIGH_PERFORMANCE ? "High Performance" :
+         power_profile_ == PowerProfile::BALANCED ? "Balanced" : "Power Saver") << std::endl;
+}
+
+void VulkanSymbioteEngine::set_workgroup_size(uint32_t x, uint32_t y, uint32_t z) {
+    workgroup_size_x_ = x;
+    workgroup_size_y_ = y;
+    workgroup_size_z_ = z;
+    
+    if (shader_runtime_) {
+        // Update shader runtime workgroup configurations
+        // This would typically recompile shaders or update dispatch parameters
+        std::cout << "[Power] Workgroup size set to (" << x << ", " << y << ", " << z << ")" << std::endl;
+    }
+}
+
+void VulkanSymbioteEngine::get_workgroup_size(uint32_t& x, uint32_t& y, uint32_t& z) const noexcept {
+    x = workgroup_size_x_;
+    y = workgroup_size_y_;
+    z = workgroup_size_z_;
+}
+

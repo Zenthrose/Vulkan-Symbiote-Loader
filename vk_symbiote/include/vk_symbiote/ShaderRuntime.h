@@ -55,6 +55,12 @@ public:
     DeviceCapabilities get_device_capabilities() const { return device_caps_; }
     VkPipelineCache get_pipeline_cache() const { return pipeline_cache_; }
     
+    // Pipeline cache persistence
+    void load_pipeline_cache();
+    void save_pipeline_cache() const;
+    static std::string get_cache_directory();
+    static std::string get_cache_file_path();
+    
     // Layout accessors for descriptor set management
     VkDescriptorSetLayout get_descriptor_set_layout() const { return descriptor_set_layout_; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout_; }

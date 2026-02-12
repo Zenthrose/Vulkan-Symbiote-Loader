@@ -72,12 +72,14 @@ ShaderRuntime::ShaderRuntime(VkDevice device, VkPhysicalDevice physical_device, 
     descriptor_set_layout_ = create_descriptor_set_layout();
     pipeline_layout_ = create_pipeline_layout();
 
-    VkPipelineCacheCreateInfo cache_info = {};
-    cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    vkCreatePipelineCache(device_, &cache_info, nullptr, &pipeline_cache_);
+    // Load existing pipeline cache from disk
+    load_pipeline_cache();
 }
 
 ShaderRuntime::~ShaderRuntime() {
+    // Save pipeline cache to disk before destroying
+    save_pipeline_cache();
+    
     for (auto shader : shader_modules_) {
         if (shader != VK_NULL_HANDLE) {
             vkDestroyShaderModule(device_, shader, nullptr);
@@ -773,3 +775,161 @@ VkSpecializationInfo ShaderRuntime::create_specialization_info(const ShaderSpeci
 }
 
 } // namespace vk_symbiote
+
+// Pipeline Cache Persistence Implementation
+
+#include <sys/stat.h>
+#include <unistd.h>
+
+std::string ShaderRuntime::get_cache_directory() {
+    const char* home = std::getenv("HOME");
+    if (!home) {
+        home = std::getenv("USERPROFILE"); // Windows fallback
+    }
+    if (!home) {
+        home = "/tmp";
+    }
+    
+    std::string cache_dir = std::string(home) + "/.cache/vk_symbiote/shaders";
+    return cache_dir;
+}
+
+std::string ShaderRuntime::get_cache_file_path() {
+    return get_cache_directory() + "/pipeline_cache.bin";
+}
+
+void ShaderRuntime::load_pipeline_cache() {
+    std::string cache_path = get_cache_file_path();
+    std::string cache_dir = get_cache_directory();
+    
+    // Create cache directory if it doesn't exist
+    struct stat st;
+    if (stat(cache_dir.c_str(), &st) != 0) {
+        // Create directory recursively
+        std::string cmd = "mkdir -p " + cache_dir;
+        std::system(cmd.c_str());
+    }
+    
+    // Try to load existing cache
+    std::ifstream cache_file(cache_path, std::ios::binary);
+    if (!cache_file.is_open()) {
+        std::cout << "[ShaderCache] No existing cache found at " << cache_path << std::endl;
+        return;
+    }
+    
+    // Read cache data
+    cache_file.seekg(0, std::ios::end);
+    size_t cache_size = cache_file.tellg();
+    cache_file.seekg(0, std::ios::beg);
+    
+    if (cache_size == 0) {
+        std::cout << "[ShaderCache] Cache file is empty" << std::endl;
+        return;
+    }
+    
+    std::vector<char> cache_data(cache_size);
+    cache_file.read(cache_data.data(), cache_size);
+    cache_file.close();
+    
+    // Validate cache header (first 4 bytes should be SPIR-V magic or Vulkan pipeline cache header)
+    if (cache_size < 16) {
+        std::cerr << "[ShaderCache] Cache file too small, ignoring" << std::endl;
+        return;
+    }
+    
+    // Check for valid Vulkan pipeline cache header
+    // Vulkan pipeline cache header format:
+    // uint32_t header_length
+    // uint32_t header_version
+    // uint32_t vendor_id
+    // uint32_t device_id
+    // uint8_t  pipeline_cache_uuid[VK_UUID_SIZE]
+    
+    const uint32_t* header = reinterpret_cast<const uint32_t*>(cache_data.data());
+    uint32_t header_length = header[0];
+    uint32_t header_version = header[1];
+    
+    // VK_PIPELINE_CACHE_HEADER_VERSION_ONE = 1
+    if (header_version != 1) {
+        std::cerr << "[ShaderCache] Invalid cache version: " << header_version << std::endl;
+        return;
+    }
+    
+    // Get current device UUID for validation
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(physical_device_, &props);
+    
+    // Compare device UUID (starts at byte 16 in header)
+    const uint8_t* cache_uuid = reinterpret_cast<const uint8_t*>(cache_data.data()) + 16;
+    if (std::memcmp(cache_uuid, props.pipelineCacheUUID, VK_UUID_SIZE) != 0) {
+        std::cout << "[ShaderCache] Device UUID mismatch, cache invalidated" << std::endl;
+        return;
+    }
+    
+    // Destroy existing cache if any
+    if (pipeline_cache_ != VK_NULL_HANDLE) {
+        vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
+    }
+    
+    // Create new cache with initial data
+    VkPipelineCacheCreateInfo cache_info = {};
+    cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    cache_info.initialDataSize = cache_size;
+    cache_info.pInitialData = cache_data.data();
+    
+    VkResult result = vkCreatePipelineCache(device_, &cache_info, nullptr, &pipeline_cache_);
+    if (result == VK_SUCCESS) {
+        std::cout << "[ShaderCache] Loaded " << cache_size << " bytes from cache" << std::endl;
+    } else {
+        std::cerr << "[ShaderCache] Failed to load cache: " << result << std::endl;
+        // Create empty cache as fallback
+        cache_info.initialDataSize = 0;
+        cache_info.pInitialData = nullptr;
+        vkCreatePipelineCache(device_, &cache_info, nullptr, &pipeline_cache_);
+    }
+}
+
+void ShaderRuntime::save_pipeline_cache() const {
+    if (pipeline_cache_ == VK_NULL_HANDLE) {
+        return;
+    }
+    
+    // Get cache data size
+    size_t cache_size = 0;
+    VkResult result = vkGetPipelineCacheData(device_, pipeline_cache_, &cache_size, nullptr);
+    if (result != VK_SUCCESS || cache_size == 0) {
+        std::cerr << "[ShaderCache] Failed to get cache data size" << std::endl;
+        return;
+    }
+    
+    // Allocate buffer and retrieve cache data
+    std::vector<char> cache_data(cache_size);
+    result = vkGetPipelineCacheData(device_, pipeline_cache_, &cache_size, cache_data.data());
+    if (result != VK_SUCCESS) {
+        std::cerr << "[ShaderCache] Failed to retrieve cache data" << std::endl;
+        return;
+    }
+    
+    // Write to file (atomically)
+    std::string cache_path = get_cache_file_path();
+    std::string temp_path = cache_path + ".tmp";
+    
+    std::ofstream cache_file(temp_path, std::ios::binary);
+    if (!cache_file.is_open()) {
+        std::cerr << "[ShaderCache] Failed to open cache file for writing" << std::endl;
+        return;
+    }
+    
+    cache_file.write(cache_data.data(), cache_size);
+    cache_file.close();
+    
+    // Atomic rename
+    if (std::rename(temp_path.c_str(), cache_path.c_str()) != 0) {
+        std::cerr << "[ShaderCache] Failed to rename cache file" << std::endl;
+        std::remove(temp_path.c_str());
+        return;
+    }
+    
+    std::cout << "[ShaderCache] Saved " << cache_size << " bytes to " << cache_path << std::endl;
+}
+

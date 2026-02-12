@@ -25,12 +25,6 @@ struct AccessRecord {
     float predicted_score = 0.0f;
 };
 
-struct MLPModel {
-    std::vector<float> w1; std::vector<float> b1;
-    std::vector<float> w2; std::vector<float> b2;
-    uint32 input_size = 64, hidden_size = 16;
-};
-
 class VitalityOracle {
 public:
     explicit VitalityOracle(uint32 max_packs_in_memory = 64);
@@ -58,27 +52,16 @@ public:
     void load_model(const std::string& path);
 
 private:
-    MLPModel model_;
-    std::mt19937 rng_{std::random_device{}()};
-    std::deque<AccessRecord> recent_accesses_;
-    uint64_t max_access_history_ = 10000;
-
+    class VitalityOracleImpl;
+    std::unique_ptr<VitalityOracleImpl> pimpl_;
+    
+    // Weights for backward compatibility
     float weight_relevance_ = 0.3f, weight_hardware_ = 0.25f;
     float weight_temporal_ = 0.2f, weight_priority_ = 0.25f;
-
+    
+    // Statistics
     float hit_rate_ = 0.0f;
-    uint64_t total_predictions_ = 0, correct_predictions_ = 0;
-
-    std::vector<float> extract_features(const PackMetadata& pack, const std::vector<uint32>& tokens,
-                                       uint32 current_layer, const HardwareTelemetry& telemetry);
-    float mlp_forward(const std::vector<float>& input);
-    void mlp_backward(const std::vector<float>& input, const std::vector<float>& gradient, float lr);
-
-    uint64_t hash_tokens(const std::vector<uint32>& tokens) const;
-    float compute_relevance(const PackMetadata& pack, const std::vector<uint32>& tokens, uint32 current_layer);
-    float compute_hardware_score(const PackMetadata& pack, const HardwareTelemetry& telemetry);
-    float compute_temporal_score(uint64 pack_id);
-    float compute_priority_bonus(const PackMetadata& pack);
+    uint64 total_predictions_ = 0;
 };
 
 } // namespace vk_symbiote

@@ -5,6 +5,9 @@
 #include <vk_mem_alloc.h>
 #include <queue>
 #include <unordered_map>
+#include <functional>
+#include <atomic>
+#include <future>
 
 namespace vk_symbiote {
 
@@ -89,13 +92,29 @@ public:
     void update_access_time() { last_access_ = get_current_time_ns(); }
     uint32 access_count() const noexcept { return access_count_; }
     void increment_access_count() { access_count_++; }
+    
+    // Async migration support
+    ExpectedVoid migrate_async(MemoryTier target_tier, std::function<void(bool)> completion_callback = nullptr);
+    bool is_migration_complete() const;
+    void wait_for_migration();
+    
 private:
-    PackMetadata metadata_; Path file_path_;
-    float* ram_data_ = nullptr; BufferRegion vram_region_;
-    // Raw compressed data read from disk for on-demand decompression
+    PackMetadata metadata_; 
+    Path file_path_;
+    float* ram_data_ = nullptr; 
+    BufferRegion vram_region_;
     std::vector<uint8_t> compressed_data_;
-    float priority_ = 0.5f; MemoryTier current_tier_ = MemoryTier::UNLOADED;
-    uint64 last_access_ = 0; uint32 access_count_ = 0;
+    float priority_ = 0.5f; 
+    MemoryTier current_tier_ = MemoryTier::UNLOADED;
+    uint64 last_access_ = 0; 
+    uint32 access_count_ = 0;
+    
+    struct MigrationState;
+    std::unique_ptr<MigrationState> migration_state_;
+    
+    bool perform_migration(MemoryTier target_tier);
+    bool migrate_to_vram_timeline();
+    
     Expected<std::vector<float>> decompress_zfp();
     Expected<std::vector<float>> decompress_blosc();
     Expected<std::vector<float>> decompress_raw();

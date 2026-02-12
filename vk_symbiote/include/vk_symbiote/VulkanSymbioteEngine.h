@@ -72,10 +72,43 @@ private:
     ExpectedVoid upload_to_gpu(const std::vector<float>& data, VkBuffer buffer);
     ExpectedVoid download_from_gpu(VkBuffer buffer, std::vector<float>& data);
     
+    // Power management
+    enum class PowerProfile { HIGH_PERFORMANCE, BALANCED, POWER_SAVER };
+    
+    void detect_power_source();
+    bool is_on_battery() const noexcept { return on_battery_; }
+    void set_power_profile(PowerProfile profile);
+    PowerProfile get_power_profile() const noexcept { return power_profile_; }
+    void apply_power_settings();
+    
+    // Throttling controls
+    void set_workgroup_size(uint32_t x, uint32_t y, uint32_t z);
+    void get_workgroup_size(uint32_t& x, uint32_t& y, uint32_t& z) const noexcept;
+    void set_prefetch_lookahead(uint32_t layers) { prefetch_lookahead_ = layers; }
+    uint32_t get_prefetch_lookahead() const noexcept { return prefetch_lookahead_; }
+    void enable_profiling(bool enable) { profiling_enabled_ = enable; }
+    bool is_profiling_enabled() const noexcept { return profiling_enabled_; }
+    
 public:
     // Performance monitoring
     const PerformanceMetrics& get_performance_metrics() const { return performance_metrics_; }
     void reset_performance_metrics() { performance_metrics_.reset(); }
+    
+private:
+    // Power management state
+    bool on_battery_ = false;
+    PowerProfile power_profile_ = PowerProfile::BALANCED;
+    uint32_t workgroup_size_x_ = 256;
+    uint32_t workgroup_size_y_ = 1;
+    uint32_t workgroup_size_z_ = 1;
+    uint32_t prefetch_lookahead_ = 3;
+    bool profiling_enabled_ = true;
+    uint32_t battery_check_interval_ms_ = 5000;
+    uint64_t last_battery_check_ = 0;
+    
+    void check_battery_status();
+    float read_battery_capacity();
+    bool read_ac_connected();
 };
 
 } // namespace vk_symbiote
