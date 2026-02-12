@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/vk_symbiote_example.dir/examples/basic_inference.cpp.o -o vk_symbiote_example  libvk_symbiote.a /usr/lib/x86_64-linux-gnu/libvulkan.so -lpthread -ldl 

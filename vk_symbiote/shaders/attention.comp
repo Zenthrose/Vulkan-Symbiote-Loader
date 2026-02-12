@@ -1,0 +1,52 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(local_size_x = 128) in;
+
+layout(binding = 0, std430) buffer QueryBuf { float q[]; };
+layout(binding = 1, std430) buffer KeyBuf { float k[]; };
+layout(binding = 2, std430) buffer ValueBuf { float v[]; };
+layout(binding = 3, std430) buffer OutBuf { float o[]; };
+
+layout(push_constant) uniform PC {
+    uint32_t seq_len, head_dim, num_heads, num_kv;
+    float scale;
+} pc;
+
+void main() {
+    uint32_t gid = gl_GlobalInvocationID.x;
+    uint32_t head = gid / pc.seq_len;
+    uint32_t pos = gid % pc.seq_len;
+    
+    if (head >= pc.num_heads || pos >= pc.seq_len) return;
+    
+    float max_score = -1e20;
+    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+        float score = 0.0;
+        for (uint32_t d = 0; d < pc.head_dim; ++d) {
+            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        }
+        max_score = max(max_score, score * pc.scale);
+    }
+    
+    float sum = 0.0;
+    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+        float score = 0.0;
+        for (uint32_t d = 0; d < pc.head_dim; ++d) {
+            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        }
+        sum += exp(score * pc.scale - max_score);
+    }
+    
+    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+        float score = 0.0;
+        for (uint32_t d = 0; d < pc.head_dim; ++d) {
+            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        }
+        float attn = exp(score * pc.scale - max_score) / sum;
+        for (uint32_t d = 0; d < pc.head_dim; ++d) {
+            uint32_t v_idx = (head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d;
+            o[pos * pc.head_dim + d] += attn * v[v_idx];
+        }
+    }
+}

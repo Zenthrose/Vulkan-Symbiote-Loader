@@ -1,0 +1,86 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_KHR_shader_subgroup : require
+
+// Specialization constants for runtime configuration
+layout (constant_id = 0) const uint WORKGROUP_SIZE_X = 256;
+layout (constant_id = 1) const uint USE_SUBGROUP_REDUCTION = 1;
+layout (constant_id = 2) const uint USE_FP16_MATH = 1;
+
+layout (push_constant) uniform PushConstants {
+    uint seq_len;          // Sequence length (batch)
+    uint hidden_size;       // Hidden dimension size
+    uint vocab_size;        // Vocabulary size
+} pc;
+
+// Input buffers
+layout (set = 0, binding = 0) readonly buffer InputBuffer {
+    float16_t input[];     // [seq_len * hidden_size]
+};
+
+layout (set = 0, binding = 1) readonly buffer WeightBuffer {
+    float16_t weight[];    // [hidden_size * vocab_size] - Final projection weights
+};
+
+layout (set = 0, binding = 2) readonly buffer BiasBuffer {
+    float16_t bias[];      // [vocab_size]
+};
+
+layout (set = 0, binding = 3) buffer OutputBuffer {
+    float16_t output[];    // [seq_len * vocab_size] - Final logits
+};
+
+// Shared memory for matrix multiplication
+shared float16_t tile_input[16][16];
+shared float16_t tile_weight[16][16];
+
+layout (local_size_x = 16, local_size_y = 16) in;
+void main() {
+    uint seq_pos = gl_WorkGroupID.x;
+    uint vocab_idx = gl_GlobalInvocationID.y;
+    
+    if (seq_pos >= pc.seq_len || vocab_idx >= pc.vocab_size) return;
+    
+    uint local_x = gl_LocalInvocationID.x;
+    uint local_y = gl_LocalInvocationID.y;
+    
+    // Compute dot product: input @ weight^T + bias
+    float16_t acc = 0.0hf;
+    
+    // Process hidden_size in tiles
+    const uint tile_size = 16;
+    for (uint h_tile = 0; h_tile < (pc.hidden_size + tile_size - 1) / tile_size; ++h_tile) {
+        
+        // Load input tile
+        uint input_idx = seq_pos * pc.hidden_size + h_tile * tile_size + local_x;
+        if (h_tile * tile_size + local_x < pc.hidden_size) {
+            tile_input[local_y][local_x] = input[input_idx];
+        } else {
+            tile_input[local_y][local_x] = 0.0hf;
+        }
+        
+        // Load weight tile (transposed for better memory access)
+        uint weight_idx = vocab_idx * pc.hidden_size + h_tile * tile_size + local_x;
+        if (h_tile * tile_size + local_x < pc.hidden_size) {
+            tile_weight[local_y][local_x] = weight[weight_idx];
+        } else {
+            tile_weight[local_y][local_x] = 0.0hf;
+        }
+        
+        barrier();
+        
+        // Compute partial dot product
+        for (uint i = 0; i < tile_size && (h_tile * tile_size + i) < pc.hidden_size; ++i) {
+            float16_t input_val = tile_input[i][local_x];
+            float16_t weight_val = tile_weight[i][local_y];
+            acc += input_val * weight_val;
+        }
+        
+        barrier();
+    }
+    
+    // Add bias and store result
+    acc += bias[vocab_idx];
+    uint output_idx = seq_pos * pc.vocab_size + vocab_idx;
+    output[output_idx] = acc;
+}

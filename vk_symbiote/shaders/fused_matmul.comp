@@ -1,0 +1,37 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(local_size_x = 128) in;
+
+layout(binding = 0, std430) buffer MatrixA {
+    float a[];
+};
+layout(binding = 1, std430) buffer MatrixB {
+    float b[];
+};
+layout(binding = 2, std430) buffer MatrixC {
+    float c[];
+};
+
+layout(push_constant) uniform PC {
+    uint32_t M, N, K, stride_a, stride_b, stride_c;
+} pc;
+
+shared float smem_a[128];
+shared float smem_b[128];
+
+void main() {
+    uint32_t tid = gl_LocalInvocationID.x;
+    uint32_t gid = gl_WorkGroupID.x;
+    uint32_t m = gid;
+    uint32_t n = tid;
+    
+    if (m >= pc.M || n >= pc.N) return;
+    
+    float sum = 0.0;
+    for (uint32_t k = 0; k < pc.K; ++k) {
+        sum += a[m * pc.stride_a + k] * b[k * pc.stride_b + n];
+    }
+    
+    c[m * pc.stride_c + n] = sum;
+}

@@ -1,0 +1,139 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_KHR_shader_subgroup : require
+
+// Specialization constants for runtime configuration
+layout (constant_id = 0) const uint WORKGROUP_SIZE_X = 16;
+layout (constant_id = 1) const uint WORKGROUP_SIZE_Y = 16;
+layout (constant_id = 2) const uint USE_SUBGROUP_OPS = 1;
+layout (constant_id = 3) const uint SUBGROUP_SIZE = 32;
+layout (constant_id = 4) const uint USE_FP16_MATH = 0;
+
+// Matrix dimensions (set via push constants or specialization)
+layout (push_constant) uniform PushConstants {
+    uint M;        // Rows in A (batch * seq_len)
+    uint N;        // Cols in B (hidden_size)
+    uint K;        // Cols in A / Rows in B (head_dim)
+    uint head_idx; // Current attention head index
+    uint seq_len;  // Current sequence length
+    float rope_theta; // RoPE theta parameter
+    float rope_scale; // RoPE scaling factor
+} pc;
+
+// Input buffers
+layout (set = 0, binding = 0) readonly buffer WeightBuffer {
+    // Packed weights for this attention head + RoPE parameters
+    float16_t weights[]; // [K * N] weight matrix (transposed for better memory access)
+};
+
+layout (set = 0, binding = 1) readonly buffer RoPEBuffer {
+    float16_t rope_cos[]; // [K/2 * max_seq_len] cos values for RoPE
+    float16_t rope_sin[]; // [K/2 * max_seq_len] sin values for RoPE
+    float16_t rope_freqs[]; // [K/2] frequency values
+};
+
+layout (set = 0, binding = 2) readonly buffer InputBuffer {
+    float16_t input[]; // [M * K] input matrix (Q or K matrix)
+};
+
+layout (set = 0, binding = 3) buffer OutputBuffer {
+    float16_t output[]; // [M * N] output matrix (Q_proj or K_proj + RoPE)
+};
+
+// Shared memory for tiling
+shared float16_t tile_A[WORKGROUP_SIZE_Y][WORKGROUP_SIZE_X];
+shared float16_t tile_B[WORKGROUP_SIZE_Y][WORKGROUP_SIZE_X];
+
+// Fused RoPE application
+void apply_rope_to_element(inout float16_t value, uint dim, uint pos) {
+    // RoPE is applied to pairs of dimensions
+    if (dim % 2 == 0 && dim + 1 < pc.K) {
+        uint pair_idx = dim / 2;
+        
+        // Get frequency values
+        float16_t freq = rope_freqs[pair_idx];
+        float16_t angle = pos * pc.rope_scale * freq;
+        
+        // Get sin/cos values
+        float16_t cos_val = cos(angle);
+        float16_t sin_val = sin(angle);
+        
+        // For the first dimension in pair, we need the second dimension value
+        float16_t x = value;
+        float16_t y = input[pos * pc.K + dim + 1]; // Get corresponding pair value
+        
+        // Apply RoPE: [x*cos - y*sin, x*sin + y*cos]
+        value = x * cos_val - y * sin_val;
+    } else if (dim % 2 == 1 && dim - 1 >= 0) {
+        // For the second dimension, apply the second half of RoPE
+        uint pair_idx = (dim - 1) / 2;
+        
+        float16_t freq = rope_freqs[pair_idx];
+        float16_t angle = pos * pc.rope_scale * freq;
+        
+        float16_t cos_val = cos(angle);
+        float16_t sin_val = sin(angle);
+        
+        float16_t x = input[pos * pc.K + dim - 1]; // Get corresponding pair value
+        float16_t y = value;
+        
+        value = x * sin_val + y * cos_val;
+    }
+}
+
+layout (local_size_x_id = 0, local_size_y_id = 1) in;
+void main() {
+    uint global_x = gl_GlobalInvocationID.x; // Column dimension (N)
+    uint global_y = gl_GlobalInvocationID.y; // Row dimension (M)
+    uint local_x = gl_LocalInvocationID.x;
+    uint local_y = gl_LocalInvocationID.y;
+    
+    // Initialize accumulator
+    float16_t acc = 0.0hf;
+    
+    // Process K dimension in tiles
+    const uint tile_size_K = WORKGROUP_SIZE_X;
+    for (uint k_tile = 0; k_tile < (pc.K + tile_size_K - 1) / tile_size_K; ++k_tile) {
+        
+        // Load input tile (A matrix) - [M x K]
+        uint a_global_row = global_y;
+        uint a_global_col = k_tile * tile_size_K + local_x;
+        
+        if (a_global_row < pc.M && a_global_col < pc.K) {
+            tile_A[local_y][local_x] = input[a_global_row * pc.K + a_global_col];
+        } else {
+            tile_A[local_y][local_x] = 0.0hf;
+        }
+        
+        // Load weight tile (B^T matrix) - [K x N] transposed to [N x K]
+        uint b_global_row = global_x;
+        uint b_global_col = k_tile * tile_size_K + local_x;
+        
+        if (b_global_row < pc.N && b_global_col < pc.K) {
+            tile_B[local_y][local_x] = weights[b_global_row * pc.K + b_global_col];
+        } else {
+            tile_B[local_y][local_x] = 0.0hf;
+        }
+        
+        barrier(); // Wait for tile loads
+        
+        // Compute partial dot product
+        for (uint k = 0; k < tile_size_K && (k_tile * tile_size_K + k) < pc.K; ++k) {
+            float16_t a_val = tile_A[local_y][k];
+            float16_t b_val = tile_B[k][local_x];
+            acc += a_val * b_val;
+        }
+        
+        barrier(); // Wait for computation before next tile
+    }
+    
+    // Write result to output buffer
+    if (global_y < pc.M && global_x < pc.N) {
+        // Apply RoPE if we're computing Q or K matrices
+        if (pc.head_idx < pc.N / pc.K) { // Only apply to Q/K, not output projection
+            apply_rope_to_element(acc, global_x % pc.K, global_y);
+        }
+        
+        output[global_y * pc.N + global_x] = acc;
+    }
+}

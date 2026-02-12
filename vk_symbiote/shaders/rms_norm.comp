@@ -1,0 +1,35 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(local_size_x = 256) in;
+
+layout(binding = 0, std430) buffer InBuf { float in_v[]; };
+layout(binding = 1, std430) buffer WeightBuf { float w[]; };
+layout(binding = 2, std430) buffer OutBuf { float out_v[]; };
+
+layout(push_constant) uniform PC {
+    uint32_t hidden, seq_len;
+    float eps;
+} pc;
+
+shared float smem[256];
+
+void main() {
+    uint32_t gid = gl_GlobalInvocationID.x;
+    uint32_t token = gid / pc.hidden;
+    uint32_t dim = gid % pc.hidden;
+    
+    if (token >= pc.seq_len || dim >= pc.hidden) return;
+    
+    float val = in_v[token * pc.hidden + dim];
+    smem[dim] = val * val;
+    
+    memoryBarrierShared();
+    barrier();
+    
+    float variance = 0.0;
+    for (uint32_t i = 0; i < pc.hidden; ++i) variance += smem[i];
+    variance = variance / float(pc.hidden) + pc.eps;
+    
+    out_v[token * pc.hidden + dim] = val / sqrt(variance) * w[dim];
+}

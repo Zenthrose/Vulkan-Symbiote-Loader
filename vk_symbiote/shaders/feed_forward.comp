@@ -1,0 +1,34 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(local_size_x = 256) in;
+
+layout(binding = 0, std430) buffer InBuf { float in_d[]; };
+layout(binding = 1, std430) buffer GateBuf { float gate_d[]; };
+layout(binding = 2, std430) buffer UpBuf { float up_d[]; };
+layout(binding = 3, std430) buffer DownBuf { float down_d[]; };
+layout(binding = 4, std430) buffer OutBuf { float out_d[]; };
+
+layout(push_constant) uniform PC {
+    uint32_t hidden, inter, seq;
+} pc;
+
+float silu(float x) { return x / (1.0 + exp(-x)); }
+
+void main() {
+    uint32_t gid = gl_GlobalInvocationID.x;
+    uint32_t token = gid / pc.hidden;
+    uint32_t dim = gid % pc.hidden;
+    
+    if (token >= pc.seq || dim >= pc.hidden) return;
+    
+    float gate = 0.0;
+    for (uint32_t i = 0; i < pc.inter; ++i) {
+        gate += in_d[token * pc.hidden + dim] * gate_d[i * pc.hidden + dim];
+    }
+    gate = silu(gate);
+    
+    for (uint32_t i = 0; i < pc.inter; ++i) {
+        out_d[token * pc.hidden + dim] += gate * up_d[i * pc.hidden + dim] * down_d[dim * pc.inter + i];
+    }
+}
