@@ -1,0 +1,389 @@
+[  7%] Building CXX object CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o
+[ 15%] Building CXX object CMakeFiles/vk_symbiote.dir/src/Compression.cpp.o
+[ 46%] Building CXX object CMakeFiles/vk_symbiote.dir/src/ConfigManager.cpp.o
+[ 46%] Building CXX object CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o
+[ 46%] Building CXX object CMakeFiles/vk_symbiote.dir/src/NomadPack.cpp.o
+[ 53%] Building CXX object CMakeFiles/vk_symbiote.dir/src/Tokenizer.cpp.o
+[ 53%] Building CXX object CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o
+[ 61%] Building CXX object CMakeFiles/vk_symbiote.dir/src/Utils.cpp.o
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:5,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VitalityOracle.h:19:10: fatal error: SymbiotePack.h: No such file or directory
+   19 | #include "SymbiotePack.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make[2]: *** [CMakeFiles/vk_symbiote.dir/build.make:76: CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o] Error 1
+make[2]: *** Waiting for unfinished jobs....
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:5,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/ShaderRuntime.h:4,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ShaderRuntime.cpp:1:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VitalityOracle.h:19:10: fatal error: SymbiotePack.h: No such file or directory
+   19 | #include "SymbiotePack.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make[2]: *** [CMakeFiles/vk_symbiote.dir/build.make:118: CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o] Error 1
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:5,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/Tokenizer.h:3,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Tokenizer.cpp:1:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VitalityOracle.h:19:10: fatal error: SymbiotePack.h: No such file or directory
+   19 | #include "SymbiotePack.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make[2]: *** [CMakeFiles/vk_symbiote.dir/build.make:132: CMakeFiles/vk_symbiote.dir/src/Tokenizer.cpp.o] Error 1
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VitalityOracle.cpp:1:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/VitalityOracle.h:19:10: fatal error: SymbiotePack.h: No such file or directory
+   19 | #include "SymbiotePack.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make[2]: *** [CMakeFiles/vk_symbiote.dir/build.make:104: CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o] Error 1
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp:2:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/GGUFLoader.h: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::GGUFLoader::read_tensor_data(const vk_symbiote::GGUFTensorInfo&, bool)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/GGUFLoader.h:436:94: warning: unused parameter ‘fp16_to_fp32’ [-Wunused-parameter]
+  436 | Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32) {
+      |                                                                                         ~~~~~^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::ZFPDecompressor::decompress(const uint8_t*, size_t, uint64_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:17:18: warning: unused parameter ‘dims’ [-Wunused-parameter]
+   17 |         uint32_t dims = 1) {
+      |         ~~~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp: In member function ‘float vk_symbiote::ZFPDecompressor::decode_float(uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:68:25: warning: passing argument 1 to ‘restrict’-qualified parameter aliases with argument 2 [-Wrestrict]
+   68 |             std::memcpy(&value, &value, 4);
+      |                         ^~~~~~  ~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:69:21: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]
+   69 |             return *reinterpret_cast<float*>(&value);
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:73:25: warning: passing argument 1 to ‘restrict’-qualified parameter aliases with argument 2 [-Wrestrict]
+   73 |             std::memcpy(&value, &value, 4);
+      |                         ^~~~~~  ~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:74:21: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]
+   74 |             return *reinterpret_cast<float*>(&value);
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::BloscDecompressor::decompress(const uint8_t*, size_t, uint64_t)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:93:18: warning: unused variable ‘nbytes’ [-Wunused-variable]
+   93 |         uint32_t nbytes = *reinterpret_cast<const uint32_t*>(header);
+      |                  ^~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:95:18: warning: unused variable ‘blocksize’ [-Wunused-variable]
+   95 |         uint32_t blocksize = *reinterpret_cast<const uint32_t*>(header + 8);
+      |                  ^~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:97:17: warning: unused variable ‘filters’ [-Wunused-variable]
+   97 |         uint8_t filters = header[13];
+      |                 ^~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp:98:17: warning: unused variable ‘typesize’ [-Wunused-variable]
+   98 |         uint8_t typesize = header[14];
+      |                 ^~~~~~~~
+In file included from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp:8:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h: In member function ‘virtual bool compression::Blosc2Compression::compress(const void*, size_t, std::vector<unsigned char>&)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:35: warning: unused parameter ‘src’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                       ~~~~~~~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:47: warning: unused parameter ‘src_size’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                                        ~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:79: warning: unused parameter ‘out’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                                                         ~~~~~~~~~~~~~~~~~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h: In member function ‘virtual bool compression::Blosc2Compression::decompress(const uint8_t*, size_t, size_t, void*)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:40: warning: unused parameter ‘src_data’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                         ~~~~~~~~~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:57: warning: unused parameter ‘src_size’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                  ~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:74: warning: unused parameter ‘decompressed_size’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                                   ~~~~~~~^~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:99: warning: unused parameter ‘dst’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                                                             ~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::PackManager::prefetch_packs(const std::vector<long unsigned int>&, float)’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp:651:85: warning: unused parameter ‘confidence_threshold’ [-Wunused-parameter]
+  651 | ExpectedVoid PackManager::prefetch_packs(const std::vector<uint64>& pack_ids, float confidence_threshold) {
+      |                                                                               ~~~~~~^~~~~~~~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/format:47,
+                 from /usr/include/c++/13/bits/chrono_io.h:39,
+                 from /usr/include/c++/13/chrono:3370,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/Common.h:9,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/ConfigManager.h:3,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp:1:
+/usr/include/c++/13/variant: In instantiation of ‘constexpr const _Tp& std::get(const variant<_Types ...>&) [with _Tp = unsigned int; _Types = {int, float, __cxx11::basic_string<char, char_traits<char>, allocator<char> >}]’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp:265:64:   required from here
+/usr/include/c++/13/variant:1172:42: error: static assertion failed: T must occur exactly once in alternatives
+ 1172 |       static_assert(__detail::__variant::__exactly_once<_Tp, _Types...>,
+      |                     ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/variant:1172:42: note: ‘std::__detail::__variant::__exactly_once<unsigned int, int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ evaluates to false
+/usr/include/c++/13/variant: In instantiation of ‘struct std::variant_alternative<3, std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >’:
+/usr/include/c++/13/variant:105:11:   required by substitution of ‘template<long unsigned int _Np, class _Variant> using std::variant_alternative_t = typename std::variant_alternative::type [with long unsigned int _Np = 3; _Variant = std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >]’
+/usr/include/c++/13/variant:1744:5:   required by substitution of ‘template<long unsigned int _Np, class ... _Types> constexpr std::variant_alternative_t<_Np, std::variant<_Types ...> >&& std::get(const variant<_Types ...>&&) [with long unsigned int _Np = 3; _Types = {int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >}]’
+/usr/include/c++/13/variant:1175:27:   required from ‘constexpr const _Tp& std::get(const variant<_Types ...>&) [with _Tp = unsigned int; _Types = {int, float, __cxx11::basic_string<char, char_traits<char>, allocator<char> >}]’
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp:265:64:   required from here
+/usr/include/c++/13/variant:99:25: error: static assertion failed
+   99 |       static_assert(_Np < sizeof...(_Types));
+      |                     ~~~~^~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/variant:99:25: note: the comparison reduces to ‘(3 < 3)’
+/usr/include/c++/13/variant:101:13: error: no type named ‘type’ in ‘struct std::_Nth_type<3, int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’
+  101 |       using type = typename _Nth_type<_Np, _Types...>::type;
+      |             ^~~~
+/usr/include/c++/13/variant: In instantiation of ‘constexpr const _Tp& std::get(const variant<_Types ...>&) [with _Tp = unsigned int; _Types = {int, float, __cxx11::basic_string<char, char_traits<char>, allocator<char> >}]’:
+/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp:265:64:   required from here
+/usr/include/c++/13/variant:1175:27: error: no matching function for call to ‘get<__n>(const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+In file included from /usr/include/c++/13/bits/stl_algobase.h:64,
+                 from /usr/include/c++/13/string:51,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/Common.h:5:
+/usr/include/c++/13/bits/stl_pair.h:1035:5: note: candidate: ‘template<long unsigned int _Int, class _Tp1, class _Tp2> constexpr typename std::tuple_element<_Int, std::pair<_Tp1, _Tp2> >::type& std::get(pair<_Tp1, _Tp2>&)’
+ 1035 |     get(pair<_Tp1, _Tp2>& __in) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1035:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::pair<_Tp1, _Tp2>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/bits/stl_pair.h:1040:5: note: candidate: ‘template<long unsigned int _Int, class _Tp1, class _Tp2> constexpr typename std::tuple_element<_Int, std::pair<_Tp1, _Tp2> >::type&& std::get(pair<_Tp1, _Tp2>&&)’
+ 1040 |     get(pair<_Tp1, _Tp2>&& __in) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1040:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::pair<_Tp1, _Tp2>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/bits/stl_pair.h:1045:5: note: candidate: ‘template<long unsigned int _Int, class _Tp1, class _Tp2> constexpr const typename std::tuple_element<_Int, std::pair<_Tp1, _Tp2> >::type& std::get(const pair<_Tp1, _Tp2>&)’
+ 1045 |     get(const pair<_Tp1, _Tp2>& __in) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1045:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::pair<_Tp1, _Tp2>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/bits/stl_pair.h:1050:5: note: candidate: ‘template<long unsigned int _Int, class _Tp1, class _Tp2> constexpr const typename std::tuple_element<_Int, std::pair<_Tp1, _Tp2> >::type&& std::get(const pair<_Tp1, _Tp2>&&)’
+ 1050 |     get(const pair<_Tp1, _Tp2>&& __in) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1050:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::pair<_Tp1, _Tp2>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/bits/stl_pair.h:1059:5: note: candidate: ‘template<class _Tp, class _Up> constexpr _Tp& std::get(pair<_T1, _T2>&)’
+ 1059 |     get(pair<_Tp, _Up>& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1059:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr _Tp& std::get(pair<_T1, _T2>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1064:5: note: candidate: ‘template<class _Tp, class _Up> constexpr const _Tp& std::get(const pair<_T1, _T2>&)’
+ 1064 |     get(const pair<_Tp, _Up>& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1064:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr const _Tp& std::get(const pair<_T1, _T2>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1069:5: note: candidate: ‘template<class _Tp, class _Up> constexpr _Tp&& std::get(pair<_T1, _T2>&&)’
+ 1069 |     get(pair<_Tp, _Up>&& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1069:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr _Tp&& std::get(pair<_T1, _T2>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1074:5: note: candidate: ‘template<class _Tp, class _Up> constexpr const _Tp&& std::get(const pair<_T1, _T2>&&)’
+ 1074 |     get(const pair<_Tp, _Up>&& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1074:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr const _Tp&& std::get(const pair<_T1, _T2>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1079:5: note: candidate: ‘template<class _Tp, class _Up> constexpr _Tp& std::get(pair<_Up, _Tp>&)’
+ 1079 |     get(pair<_Up, _Tp>& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1079:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr _Tp& std::get(pair<_Up, _Tp>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1084:5: note: candidate: ‘template<class _Tp, class _Up> constexpr const _Tp& std::get(const pair<_Up, _Tp>&)’
+ 1084 |     get(const pair<_Up, _Tp>& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1084:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr const _Tp& std::get(const pair<_Up, _Tp>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1089:5: note: candidate: ‘template<class _Tp, class _Up> constexpr _Tp&& std::get(pair<_Up, _Tp>&&)’
+ 1089 |     get(pair<_Up, _Tp>&& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1089:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr _Tp&& std::get(pair<_Up, _Tp>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/bits/stl_pair.h:1094:5: note: candidate: ‘template<class _Tp, class _Up> constexpr const _Tp&& std::get(const pair<_Up, _Tp>&&)’
+ 1094 |     get(const pair<_Up, _Tp>&& __p) noexcept
+      |     ^~~
+/usr/include/c++/13/bits/stl_pair.h:1094:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class _Up> constexpr const _Tp&& std::get(const pair<_Up, _Tp>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+In file included from /usr/include/c++/13/tuple:44,
+                 from /usr/include/c++/13/bits/uses_allocator_args.h:38,
+                 from /usr/include/c++/13/bits/memory_resource.h:41,
+                 from /usr/include/c++/13/string:58:
+/usr/include/c++/13/bits/ranges_util.h:449:5: note: candidate: ‘template<long unsigned int _Num, class _It, class _Sent, std::ranges::subrange_kind _Kind>  requires  _Num < 2 constexpr auto std::ranges::get(subrange<_It, _Sent, _Kind>&&)’
+  449 |     get(subrange<_It, _Sent, _Kind>&& __r)
+      |     ^~~
+/usr/include/c++/13/bits/ranges_util.h:449:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::ranges::subrange<_It, _Sent, _Kind>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/bits/ranges_util.h:438:5: note: candidate: ‘template<long unsigned int _Num, class _It, class _Sent, std::ranges::subrange_kind _Kind>  requires  _Num < 2 constexpr auto std::ranges::get(const subrange<_It, _Sent, _Kind>&)’
+  438 |     get(const subrange<_It, _Sent, _Kind>& __r)
+      |     ^~~
+/usr/include/c++/13/bits/ranges_util.h:438:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::ranges::subrange<_It, _Sent, _Kind>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1803:5: note: candidate: ‘template<long unsigned int __i, class ... _Elements> constexpr std::__tuple_element_t<__i, std::tuple<_UTypes ...> >& std::get(tuple<_UTypes ...>&)’
+ 1803 |     get(tuple<_Elements...>& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1803:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::tuple<_UTypes ...>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1809:5: note: candidate: ‘template<long unsigned int __i, class ... _Elements> constexpr std::__tuple_element_t<__i, std::tuple<_UTypes ...> >& std::get(const tuple<_UTypes ...>&)’
+ 1809 |     get(const tuple<_Elements...>& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1809:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::tuple<_UTypes ...>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1815:5: note: candidate: ‘template<long unsigned int __i, class ... _Elements> constexpr std::__tuple_element_t<__i, std::tuple<_UTypes ...> >&& std::get(tuple<_UTypes ...>&&)’
+ 1815 |     get(tuple<_Elements...>&& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1815:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::tuple<_UTypes ...>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1824:5: note: candidate: ‘template<long unsigned int __i, class ... _Elements> constexpr std::__tuple_element_t<__i, std::tuple<_UTypes ...> >&& std::get(const tuple<_UTypes ...>&&)’
+ 1824 |     get(const tuple<_Elements...>&& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1824:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::tuple<_UTypes ...>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1834:5: note: candidate: ‘template<long unsigned int __i, class ... _Elements> constexpr std::__enable_if_t<(__i >= sizeof... (_Types))> std::get(const tuple<_UTypes ...>&)’ (deleted)
+ 1834 |     get(const tuple<_Elements...>&) = delete;
+      |     ^~~
+/usr/include/c++/13/tuple:1834:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::tuple<_UTypes ...>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/tuple:1844:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr _Tp& std::get(tuple<_UTypes ...>&)’
+ 1844 |     get(tuple<_Types...>& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1844:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr _Tp& std::get(tuple<_UTypes ...>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/tuple:1855:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr _Tp&& std::get(tuple<_UTypes ...>&&)’
+ 1855 |     get(tuple<_Types...>&& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1855:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr _Tp&& std::get(tuple<_UTypes ...>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/tuple:1866:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr const _Tp& std::get(const tuple<_UTypes ...>&)’
+ 1866 |     get(const tuple<_Types...>& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1866:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr const _Tp& std::get(const tuple<_UTypes ...>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/tuple:1878:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr const _Tp&& std::get(const tuple<_UTypes ...>&&)’
+ 1878 |     get(const tuple<_Types...>&& __t) noexcept
+      |     ^~~
+/usr/include/c++/13/tuple:1878:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr const _Tp&& std::get(const tuple<_UTypes ...>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+In file included from /usr/include/c++/13/functional:65,
+                 from /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote/Common.h:8:
+/usr/include/c++/13/array:384:5: note: candidate: ‘template<long unsigned int _Int, class _Tp, long unsigned int _Nm> constexpr _Tp& std::get(array<_Tp, _Nm>&)’
+  384 |     get(array<_Tp, _Nm>& __arr) noexcept
+      |     ^~~
+/usr/include/c++/13/array:384:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::array<_Tp, _Nm>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/array:393:5: note: candidate: ‘template<long unsigned int _Int, class _Tp, long unsigned int _Nm> constexpr _Tp&& std::get(array<_Tp, _Nm>&&)’
+  393 |     get(array<_Tp, _Nm>&& __arr) noexcept
+      |     ^~~
+/usr/include/c++/13/array:393:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::array<_Tp, _Nm>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/array:402:5: note: candidate: ‘template<long unsigned int _Int, class _Tp, long unsigned int _Nm> constexpr const _Tp& std::get(const array<_Tp, _Nm>&)’
+  402 |     get(const array<_Tp, _Nm>& __arr) noexcept
+      |     ^~~
+/usr/include/c++/13/array:402:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::array<_Tp, _Nm>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/array:411:5: note: candidate: ‘template<long unsigned int _Int, class _Tp, long unsigned int _Nm> constexpr const _Tp&& std::get(const array<_Tp, _Nm>&&)’
+  411 |     get(const array<_Tp, _Nm>&& __arr) noexcept
+      |     ^~~
+/usr/include/c++/13/array:411:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ is not derived from ‘const std::array<_Tp, _Nm>’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1711:5: note: candidate: ‘template<long unsigned int _Np, class ... _Types> constexpr std::variant_alternative_t<_Np, std::variant<_Types ...> >& std::get(variant<_Types ...>&)’
+ 1711 |     get(variant<_Types...>& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1711:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::variant<_Types ...>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1722:5: note: candidate: ‘template<long unsigned int _Np, class ... _Types> constexpr std::variant_alternative_t<_Np, std::variant<_Types ...> >&& std::get(variant<_Types ...>&&)’
+ 1722 |     get(variant<_Types...>&& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1722:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: note:   types ‘std::variant<_Types ...>’ and ‘const std::variant<int, float, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >’ have incompatible cv-qualifiers
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1733:5: note: candidate: ‘template<long unsigned int _Np, class ... _Types> constexpr std::variant_alternative_t<_Np, std::variant<_Types ...> >& std::get(const variant<_Types ...>&)’
+ 1733 |     get(const variant<_Types...>& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1733:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1744:5: note: candidate: ‘template<long unsigned int _Np, class ... _Types> constexpr std::variant_alternative_t<_Np, std::variant<_Types ...> >&& std::get(const variant<_Types ...>&&)’
+ 1744 |     get(const variant<_Types...>&& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1744:5: note:   substitution of deduced template arguments resulted in errors seen above
+/usr/include/c++/13/variant:1150:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr _Tp& std::get(variant<_Types ...>&)’
+ 1150 |     get(variant<_Types...>& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1150:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr _Tp& std::get(variant<_Types ...>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/variant:1160:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr _Tp&& std::get(variant<_Types ...>&&)’
+ 1160 |     get(variant<_Types...>&& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1160:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr _Tp&& std::get(variant<_Types ...>&&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+/usr/include/c++/13/variant:1170:5: note: candidate: ‘template<class _Tp, class ... _Types> constexpr const _Tp& std::get(const variant<_Types ...>&)’
+ 1170 |     get(const variant<_Types...>& __v)
+      |     ^~~
+/usr/include/c++/13/variant:1170:5: note:   template argument deduction/substitution failed:
+/usr/include/c++/13/variant:1175:27: error: type/value mismatch at argument 1 in template parameter list for ‘template<class _Tp, class ... _Types> constexpr const _Tp& std::get(const variant<_Types ...>&)’
+ 1175 |       return std::get<__n>(__v);
+      |              ~~~~~~~~~~~~~^~~~~
+/usr/include/c++/13/variant:1175:27: note:   expected a type, got ‘__n’
+make[2]: *** [CMakeFiles/vk_symbiote.dir/build.make:174: CMakeFiles/vk_symbiote.dir/src/ConfigManager.cpp.o] Error 1
+make[1]: *** [CMakeFiles/Makefile2:87: CMakeFiles/vk_symbiote.dir/all] Error 2
+make: *** [Makefile:91: all] Error 2

@@ -93,7 +93,7 @@ std::unique_ptr<Tokenizer> Tokenizer::from_gguf(const std::filesystem::path& ggu
         // Build tokenizer from loaded vocabulary
         size_t vocab_size = vocab_list.size();
         tokenizer->vocab_ = vocab_list;
-        tokenizer->token_to_id_ = vocab_map;
+        tokenizer->token_to_id_map_ = vocab_map;
         
         // Reverse map for decoding
         for (const auto& [token, id] : vocab_map) {
@@ -114,13 +114,13 @@ std::unique_ptr<Tokenizer> Tokenizer::create_simple_tokenizer() {
     
     // Create a basic byte-level tokenizer as fallback
     tokenizer->vocab_.resize(256);
-    tokenizer->token_to_id_.resize(256);
+    // token_to_id_ is not used in simple tokenizer, only token_to_id_map_
     tokenizer->id_to_token_.resize(256);
     
     for (uint32_t i = 0; i < 256; ++i) {
         std::string token(1, static_cast<char>(i));
         tokenizer->vocab_[i] = token;
-        tokenizer->token_to_id_[token] = i;
+        tokenizer->token_to_id_map_[token] = i;
         tokenizer->id_to_token_[i] = token;
     }
     
@@ -130,21 +130,21 @@ std::unique_ptr<Tokenizer> Tokenizer::create_simple_tokenizer() {
 std::vector<uint32_t> Tokenizer::encode(const std::string& text) const {
     std::vector<uint32_t> tokens;
     
-    if (!token_to_id_.empty()) {
+    if (!token_to_id_map_.empty()) {
         // Use vocabulary-based encoding
         std::istringstream iss(text);
         std::string word;
         
         while (iss >> word) {
-            auto it = token_to_id_.find(word);
-            if (it != token_to_id_.end()) {
+            auto it = token_to_id_map_.find(word);
+            if (it != token_to_id_map_.end()) {
                 tokens.push_back(it->second);
             } else {
                 // Try character-level encoding for unknown words
                 for (char c : word) {
                     std::string char_str(1, c);
-                    auto char_it = token_to_id_.find(char_str);
-                    if (char_it != token_to_id_.end()) {
+                    auto char_it = token_to_id_map_.find(char_str);
+                    if (char_it != token_to_id_map_.end()) {
                         tokens.push_back(char_it->second);
                     } else {
                         // Add as unknown token (hash-based fallback)

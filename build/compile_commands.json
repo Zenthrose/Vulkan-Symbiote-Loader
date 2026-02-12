@@ -1,0 +1,62 @@
+[
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VulkanSymbioteEngine.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VulkanSymbioteEngine.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/NomadPack.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/NomadPack.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/NomadPack.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VitalityOracle.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/VitalityOracle.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ShaderRuntime.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ShaderRuntime.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/Tokenizer.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Tokenizer.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Tokenizer.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/Tokenizer.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/Compression.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Compression.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/Compression.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/Utils.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Utils.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/Utils.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/Utils.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote.dir/src/ConfigManager.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/src/ConfigManager.cpp",
+  "output": "CMakeFiles/vk_symbiote.dir/src/ConfigManager.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote_example.dir/examples/basic_inference.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/examples/basic_inference.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/examples/basic_inference.cpp",
+  "output": "CMakeFiles/vk_symbiote_example.dir/examples/basic_inference.cpp.o"
+},
+{
+  "directory": "/media/michael/external/Vulkan-Symbiote-loader/build",
+  "command": "/usr/bin/c++  -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/include/vk_symbiote -I/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/../compression/include -O3 -DNDEBUG -std=c++20 -Wall -Wextra -O3 -DNDEBUG -o CMakeFiles/vk_symbiote_benchmark.dir/examples/benchmark.cpp.o -c /media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/examples/benchmark.cpp",
+  "file": "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/examples/benchmark.cpp",
+  "output": "CMakeFiles/vk_symbiote_benchmark.dir/examples/benchmark.cpp.o"
+}
+]

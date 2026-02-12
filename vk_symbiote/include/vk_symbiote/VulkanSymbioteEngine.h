@@ -72,6 +72,7 @@ private:
     ExpectedVoid upload_to_gpu(const std::vector<float>& data, VkBuffer buffer);
     ExpectedVoid download_from_gpu(VkBuffer buffer, std::vector<float>& data);
     
+public:
     // Performance monitoring
     const PerformanceMetrics& get_performance_metrics() const { return performance_metrics_; }
     void reset_performance_metrics() { performance_metrics_.reset(); }

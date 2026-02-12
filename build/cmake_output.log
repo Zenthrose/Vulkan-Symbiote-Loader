@@ -1,0 +1,15 @@
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Vulkan: /usr/lib/x86_64-linux-gnu/libvulkan.so (found version "1.4.313") found components: glslc glslangValidator 
+-- Found VMA header: /usr/include/vk_mem_alloc.h
+-- === Vulkan Symbiote Configuration ===
+-- Build type: Release
+-- Vulkan found: TRUE
+-- ==========================================
+-- Configuring done (1.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /media/michael/external/Vulkan-Symbiote-loader/build

@@ -262,7 +262,7 @@ void ConfigManager::parse_logging_section(const std::unordered_map<std::string, 
     }
     it = config.find("max_log_file_size_mb");
     if (it != config.end()) {
-        logging_config_.max_log_file_size_mb = std::get<uint32>(it->second);
+        logging_config_.max_log_file_size_mb = static_cast<uint32>(std::get<int>(it->second));
     }
 }
 

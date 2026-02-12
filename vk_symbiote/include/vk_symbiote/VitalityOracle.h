@@ -36,10 +36,10 @@ public:
     explicit VitalityOracle(uint32 max_packs_in_memory = 64);
     ~VitalityOracle();
 
-    VitalityScore score_pack(const PackMetadata& pack, const std::vector<uint32_t>& tokens,
+    VitalityScore score_pack(const PackMetadata& pack, const std::vector<uint32>& tokens,
                              uint32 current_layer, const HardwareTelemetry& telemetry);
 
-    std::vector<uint64> predict_next_packs(const std::vector<uint32_t>& tokens,
+    std::vector<uint64> predict_next_packs(const std::vector<uint32>& tokens,
                                            uint32 current_layer, uint32 lookahead = 3, uint32 count = 8);
 
     void update_telemetry(const HardwareTelemetry& telemetry);
@@ -69,13 +69,13 @@ private:
     float hit_rate_ = 0.0f;
     uint64_t total_predictions_ = 0, correct_predictions_ = 0;
 
-    std::vector<float> extract_features(const PackMetadata& pack, const std::vector<uint32_t>& tokens,
+    std::vector<float> extract_features(const PackMetadata& pack, const std::vector<uint32>& tokens,
                                        uint32 current_layer, const HardwareTelemetry& telemetry);
     float mlp_forward(const std::vector<float>& input);
     void mlp_backward(const std::vector<float>& input, const std::vector<float>& gradient, float lr);
 
-    uint64_t hash_tokens(const std::vector<uint32_t>& tokens) const;
-    float compute_relevance(const PackMetadata& pack, const std::vector<uint32_t>& tokens, uint32 current_layer);
+    uint64_t hash_tokens(const std::vector<uint32>& tokens) const;
+    float compute_relevance(const PackMetadata& pack, const std::vector<uint32>& tokens, uint32 current_layer);
     float compute_hardware_score(const PackMetadata& pack, const HardwareTelemetry& telemetry);
     float compute_temporal_score(uint64 pack_id);
     float compute_priority_bonus(const PackMetadata& pack);

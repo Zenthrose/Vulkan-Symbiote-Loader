@@ -420,9 +420,15 @@ Expected<std::vector<float>> VulkanSymbioteEngine::attention(const std::vector<f
 
         // Setup descriptor sets
         VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
-            shader_runtime_->get_pipeline_cache()); // This would need proper layout access
+            shader_runtime_->get_descriptor_set_layout());
+        
+        if (descriptor_set == VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, input_buffer, input_alloc);
+            vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+            return Expected<std::vector<float>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+        }
             
-        VkDescriptorBufferInfo buffer_infos[] = {
+        std::vector<VkDescriptorBufferInfo> buffer_infos = {
             {input_buffer, 0, VK_WHOLE_SIZE},  // Q buffer  
             {input_buffer, 0, VK_WHOLE_SIZE},  // K buffer (for simplicity, same as Q)
             {input_buffer, 0, VK_WHOLE_SIZE},  // V buffer (for simplicity, same as Q)
@@ -547,9 +553,17 @@ Expected<std::vector<float>> VulkanSymbioteEngine::feed_forward(const std::vecto
 
         // Setup descriptor sets for SwiGLU computation
         VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
-            shader_runtime_->get_pipeline_cache());
+            shader_runtime_->get_descriptor_set_layout());
+        
+        if (descriptor_set == VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, input_buffer, input_alloc);
+            vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+            vmaDestroyBuffer(allocator_, gate_weight_buffer, gate_alloc);
+            vmaDestroyBuffer(allocator_, up_weight_buffer, up_alloc);
+            return Expected<std::vector<float>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+        }
             
-        VkDescriptorBufferInfo buffer_infos[] = {
+        std::vector<VkDescriptorBufferInfo> buffer_infos = {
             {gate_weight_buffer, 0, VK_WHOLE_SIZE},  // Gate weights
             {up_weight_buffer, 0, VK_WHOLE_SIZE},    // Up weights
             {input_buffer, 0, VK_WHOLE_SIZE},        // Input
@@ -660,9 +674,15 @@ Expected<std::vector<float>> VulkanSymbioteEngine::rms_norm(const std::vector<fl
 
         // Setup descriptor sets
         VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
-            shader_runtime_->create_descriptor_set_layout()); // Fix: use layout accessor
+            shader_runtime_->get_descriptor_set_layout());
+        
+        if (descriptor_set == VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, input_buffer, input_alloc);
+            vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+            return Expected<std::vector<float>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+        }
             
-        VkDescriptorBufferInfo buffer_infos[] = {
+        std::vector<VkDescriptorBufferInfo> buffer_infos = {
             {input_buffer, 0, VK_WHOLE_SIZE},  // Input buffer
             {output_buffer, 0, VK_WHOLE_SIZE}   // Output buffer
         };

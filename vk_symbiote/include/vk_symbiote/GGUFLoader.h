@@ -129,14 +129,14 @@ private:
     ExpectedVoid read_array(std::vector<T>& arr, GGUFValueType element_type);
 };
 
-GGUFLoader::GGUFLoader(const Path& file_path) : file_path_(file_path) {
+inline GGUFLoader::GGUFLoader(const Path& file_path) : file_path_(file_path) {
 }
 
-GGUFLoader::~GGUFLoader() {
+inline GGUFLoader::~GGUFLoader() {
     close();
 }
 
-ExpectedVoid GGUFLoader::load() {
+inline ExpectedVoid GGUFLoader::load() {
     file_.open(file_path_.c_str(), std::ios::binary);
     if (!file_.is_open()) {
         return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
@@ -163,7 +163,7 @@ ExpectedVoid GGUFLoader::load() {
     return make_expected_success();
 }
 
-ExpectedVoid GGUFLoader::close() {
+inline ExpectedVoid GGUFLoader::close() {
     if (file_.is_open()) {
         file_.close();
     }
@@ -178,7 +178,7 @@ ExpectedVoid GGUFLoader::close() {
     return make_expected_success();
 }
 
-ExpectedVoid GGUFLoader::read_header() {
+inline ExpectedVoid GGUFLoader::read_header() {
     char magic[4];
     file_.read(magic, 4);
 
@@ -193,7 +193,7 @@ ExpectedVoid GGUFLoader::read_header() {
     return make_expected_success();
 }
 
-ExpectedVoid GGUFLoader::read_metadata() {
+inline ExpectedVoid GGUFLoader::read_metadata() {
     for (uint64 i = 0; i < header_.metadata_kv_count; ++i) {
         GGUFMetadataKV kv;
 
@@ -268,7 +268,7 @@ ExpectedVoid GGUFLoader::read_metadata() {
     return make_expected_success();
 }
 
-ExpectedVoid GGUFLoader::read_tensors() {
+inline ExpectedVoid GGUFLoader::read_tensors() {
     uint64 current_offset = data_offset_;
 
     for (uint64 i = 0; i < header_.tensor_count; ++i) {
@@ -316,7 +316,7 @@ ExpectedVoid GGUFLoader::read_tensors() {
     return make_expected_success();
 }
 
-void GGUFLoader::parse_model_type() {
+inline void GGUFLoader::parse_model_type() {
     for (const auto& kv : metadata_) {
         if (kv.key == "general.architecture") {
             if (kv.value_type == GGUFValueType::STRING) {
@@ -327,7 +327,7 @@ void GGUFLoader::parse_model_type() {
     }
 }
 
-void GGUFLoader::parse_hyperparameters() {
+inline void GGUFLoader::parse_hyperparameters() {
     for (const auto& kv : metadata_) {
         if (kv.key == "llama.context_length" || kv.key == "llama.contextLength") {
             if (kv.value_type == GGUFValueType::UINT32) {
@@ -375,7 +375,7 @@ void GGUFLoader::parse_hyperparameters() {
     model_config_.head_dim = model_config_.hidden_size / model_config_.num_attention_heads;
 }
 
-ExpectedVoid GGUFLoader::read_string(std::string& str) {
+inline ExpectedVoid GGUFLoader::read_string(std::string& str) {
     uint64 len;
     file_.read(reinterpret_cast<char*>(&len), 8);
 
@@ -385,7 +385,7 @@ ExpectedVoid GGUFLoader::read_string(std::string& str) {
     return make_expected_success();
 }
 
-ExpectedVoid GGUFLoader::read_value(void* value, GGUFValueType type) {
+inline ExpectedVoid GGUFLoader::read_value(void* value, GGUFValueType type) {
     switch (type) {
         case GGUFValueType::UINT8:
             file_.read(static_cast<char*>(value), 1);
@@ -410,7 +410,7 @@ ExpectedVoid GGUFLoader::read_value(void* value, GGUFValueType type) {
 }
 
 template<typename T>
-ExpectedVoid GGUFLoader::read_array(std::vector<T>& arr, GGUFValueType element_type) {
+inline ExpectedVoid GGUFLoader::read_array(std::vector<T>& arr, GGUFValueType element_type) {
     uint64 len;
     file_.read(reinterpret_cast<char*>(&len), 8);
 
@@ -424,7 +424,7 @@ ExpectedVoid GGUFLoader::read_array(std::vector<T>& arr, GGUFValueType element_t
     return make_expected_success();
 }
 
-const GGUFTensorInfo* GGUFLoader::get_tensor(const std::string& name) const {
+inline const GGUFTensorInfo* GGUFLoader::get_tensor(const std::string& name) const {
     for (const auto& tensor : tensors_) {
         if (tensor.name == name) {
             return &tensor;
@@ -433,7 +433,7 @@ const GGUFTensorInfo* GGUFLoader::get_tensor(const std::string& name) const {
     return nullptr;
 }
 
-Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32) {
+inline Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32) {
     file_.seekg(static_cast<std::streamoff>(tensor.offset), std::ios::beg);
 
     uint64 element_count = 1;
@@ -478,12 +478,12 @@ Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& 
     return Expected<std::vector<float>>(std::move(result));
 }
 
-uint64 GGUFLoader::align_offset(uint64 offset, uint64 alignment) {
+inline uint64 GGUFLoader::align_offset(uint64 offset, uint64 alignment) {
     if (alignment == 0) return offset;
     return (offset + alignment - 1) / alignment * alignment;
 }
 
-std::vector<PackMetadata> GGUFLoader::generate_packs(const ModelConfig& config) {
+inline std::vector<PackMetadata> GGUFLoader::generate_packs(const ModelConfig& config) {
     std::vector<PackMetadata> packs;
 
     uint64 pack_id = 0;

@@ -8,6 +8,10 @@
 #include "../../compression/include/Blosc2Compression.h"
 // Note: We rely on a Blosc2Compression backend for lossless decompression.
 
+// Define VMA implementation in this translation unit
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 namespace vk_symbiote {
 
 FractalMemoryAllocator::FractalMemoryAllocator(VkDevice device, VmaAllocator vma, bool is_vram)

@@ -1,0 +1,5 @@
+/media/michael/external/Vulkan-Symbiote-loader/build/CMakeFiles/vk_symbiote.dir
+/media/michael/external/Vulkan-Symbiote-loader/build/CMakeFiles/vk_symbiote_example.dir
+/media/michael/external/Vulkan-Symbiote-loader/build/CMakeFiles/vk_symbiote_benchmark.dir
+/media/michael/external/Vulkan-Symbiote-loader/build/CMakeFiles/edit_cache.dir
+/media/michael/external/Vulkan-Symbiote-loader/build/CMakeFiles/rebuild_cache.dir
