@@ -86,6 +86,14 @@ struct GGUFMetadataKV {
     void* value = nullptr;
 };
 
+// Vocabulary entry for tokenizer integration
+struct VocabularyEntry {
+    std::string token;
+    std::vector<uint8_t> bytes;
+    float score = 0.0f;
+    uint32_t token_type = 0;
+};
+
 class GGUFLoader {
 public:
     explicit GGUFLoader(const Path& file_path);
@@ -103,6 +111,21 @@ public:
 
     const GGUFTensorInfo* get_tensor(const std::string& name) const;
     Expected<std::vector<float>> read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32 = true);
+    
+    // Parallel tensor loading using thread pool
+    std::vector<Expected<std::vector<float>>> read_tensors_parallel(
+        const std::vector<std::string>& tensor_names, bool fp16_to_fp32 = true);
+    
+    // Vocabulary access for tokenizer
+    const std::vector<VocabularyEntry>& get_vocabulary() const;
+    
+    // Cache management
+    void clear_tensor_cache();
+    size_t get_tensor_cache_size() const;
+    
+    // Multi-file shard support
+    ExpectedVoid add_shard(const Path& shard_path);
+    bool is_sharded() const;
 
     static uint64 align_offset(uint64 offset, uint64 alignment);
 

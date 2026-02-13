@@ -5,8 +5,139 @@
 #include <cstring>
 #include <numeric>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 
 namespace vk_symbiote {
+
+// ============================================================================
+// Simple TOML Writer (header-only implementation)
+// ============================================================================
+class SimpleTOMLWriter {
+public:
+    static bool write(const std::string& filename, 
+                      const std::vector<std::pair<std::string, std::string>>& sections) {
+        std::ofstream file(filename);
+        if (!file.is_open()) return false;
+        
+        for (const auto& [section, content] : sections) {
+            file << "[" << section << "]\n";
+            file << content << "\n\n";
+        }
+        
+        return file.good();
+    }
+    
+    static std::vector<std::pair<std::string, std::string>> read(const std::string& filename) {
+        std::vector<std::pair<std::string, std::string>> sections;
+        std::ifstream file(filename);
+        if (!file.is_open()) return sections;
+        
+        std::string line;
+        std::string current_section;
+        std::string current_content;
+        
+        while (std::getline(file, line)) {
+            // Trim whitespace
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos) continue;
+            size_t end = line.find_last_not_of(" \t");
+            line = line.substr(start, end - start + 1);
+            
+            if (line.empty() || line[0] == '#') continue;
+            
+            if (line[0] == '[' && line.back() == ']') {
+                // Save previous section
+                if (!current_section.empty()) {
+                    sections.emplace_back(current_section, current_content);
+                }
+                current_section = line.substr(1, line.length() - 2);
+                current_content.clear();
+            } else {
+                current_content += line + "\n";
+            }
+        }
+        
+        // Save last section
+        if (!current_section.empty()) {
+            sections.emplace_back(current_section, current_content);
+        }
+        
+        return sections;
+    }
+    
+    static std::string get_value(const std::string& content, const std::string& key) {
+        std::istringstream stream(content);
+        std::string line;
+        while (std::getline(stream, line)) {
+            size_t pos = line.find('=');
+            if (pos != std::string::npos) {
+                std::string k = line.substr(0, pos);
+                // Trim key
+                size_t start = k.find_first_not_of(" \t");
+                size_t end = k.find_last_not_of(" \t");
+                if (start != std::string::npos) {
+                    k = k.substr(start, end - start + 1);
+                    if (k == key) {
+                        std::string v = line.substr(pos + 1);
+                        // Trim value
+                        start = v.find_first_not_of(" \t\"");
+                        end = v.find_last_not_of(" \t\"");
+                        if (start != std::string::npos) {
+                            return v.substr(start, end - start + 1);
+                        }
+                    }
+                }
+            }
+        }
+        return "";
+    }
+};
+
+// ============================================================================
+// Entropy Calculator for Code Prompt Detection
+// ============================================================================
+class EntropyCalculator {
+public:
+    // Calculate Shannon entropy of a sequence
+    static float calculate_entropy(const std::vector<uint32_t>& tokens) {
+        if (tokens.empty()) return 0.0f;
+        
+        std::unordered_map<uint32_t, uint32_t> freq;
+        for (uint32_t token : tokens) {
+            freq[token]++;
+        }
+        
+        float entropy = 0.0f;
+        float n = static_cast<float>(tokens.size());
+        
+        for (const auto& [token, count] : freq) {
+            float p = static_cast<float>(count) / n;
+            entropy -= p * std::log2(p);
+        }
+        
+        return entropy;
+    }
+    
+    // Detect if prompt is likely code based on entropy patterns
+    static bool is_likely_code(const std::vector<uint32_t>& tokens) {
+        if (tokens.size() < 10) return false;
+        
+        float entropy = calculate_entropy(tokens);
+        
+        // Code typically has moderate entropy (not too random, not too repetitive)
+        // Entropy between 2.0 and 5.0 bits per token suggests structured content like code
+        return entropy > 2.0f && entropy < 5.0f;
+    }
+    
+    // Calculate code-specific scoring bonus
+    static float get_code_bonus(const std::vector<uint32_t>& tokens) {
+        if (!is_likely_code(tokens)) return 0.0f;
+        
+        // Boost priority for code-related packs when code is detected
+        return 0.15f; // 15% bonus for code prompts
+    }
+};
 
 // LSTM-like cell for temporal sequence modeling
 struct LSTMCell {
@@ -252,6 +383,16 @@ public:
         score.temporal_score = compute_temporal_score(pack.pack_id);
         score.priority_bonus = compute_priority_bonus(pack);
         
+        // Entropy-based code detection bonus
+        float code_bonus = EntropyCalculator::get_code_bonus(tokens);
+        if (code_bonus > 0.0f) {
+            // Boost priority for code-related packs when code is detected
+            if (pack.type == PackType::ATTENTION_Q || pack.type == PackType::ATTENTION_K || 
+                pack.type == PackType::ATTENTION_V) {
+                score.priority_bonus += code_bonus;
+            }
+        }
+        
         // LSTM-based confidence prediction
         score.confidence = output_layer_.forward(pack_state.state.h);
         score.confidence = std::clamp(score.confidence, 0.0f, 1.0f);
@@ -385,86 +526,113 @@ public:
     }
     
     void save_model(const std::string& path) {
-        std::ofstream file(path, std::ios::binary);
-        if (!file.is_open()) {
-            std::cerr << "Failed to save model to: " << path << std::endl;
-            return;
+        std::vector<std::pair<std::string, std::string>> sections;
+        
+        // Header section
+        std::stringstream header;
+        header << "version = 1\n";
+        header << "training_steps = " << training_steps_ << "\n";
+        header << "hit_rate = " << std::fixed << std::setprecision(6) << hit_rate_ << "\n";
+        header << "total_predictions = " << total_predictions_ << "\n";
+        header << "correct_predictions = " << correct_predictions_ << "\n";
+        header << "learning_rate = " << base_learning_rate_ << "\n";
+        sections.emplace_back("header", header.str());
+        
+        // LSTM weights section
+        std::stringstream lstm;
+        lstm << "Wf = " << vector_to_string(lstm_cell_.Wf) << "\n";
+        lstm << "Wi = " << vector_to_string(lstm_cell_.Wi) << "\n";
+        lstm << "Wc = " << vector_to_string(lstm_cell_.Wc) << "\n";
+        lstm << "Wo = " << vector_to_string(lstm_cell_.Wo) << "\n";
+        lstm << "Uf = " << vector_to_string(lstm_cell_.Uf) << "\n";
+        lstm << "Ui = " << vector_to_string(lstm_cell_.Ui) << "\n";
+        lstm << "Uc = " << vector_to_string(lstm_cell_.Uc) << "\n";
+        lstm << "Uo = " << vector_to_string(lstm_cell_.Uo) << "\n";
+        lstm << "bf = " << vector_to_string(lstm_cell_.bf) << "\n";
+        lstm << "bi = " << vector_to_string(lstm_cell_.bi) << "\n";
+        lstm << "bc = " << vector_to_string(lstm_cell_.bc) << "\n";
+        lstm << "bo = " << vector_to_string(lstm_cell_.bo) << "\n";
+        sections.emplace_back("lstm_weights", lstm.str());
+        
+        // Output layer section
+        std::stringstream output;
+        output << "W = " << vector_to_string(output_layer_.W) << "\n";
+        output << "b = " << output_layer_.b << "\n";
+        sections.emplace_back("output_layer", output.str());
+        
+        if (SimpleTOMLWriter::write(path, sections)) {
+            std::cout << "[Oracle] Model saved to TOML: " << path << std::endl;
+        } else {
+            std::cerr << "[Oracle] Failed to save model to: " << path << std::endl;
         }
-        
-        // Write header
-        uint32_t version = 1;
-        file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-        
-        // Write LSTM weights
-        write_vector(file, lstm_cell_.Wf);
-        write_vector(file, lstm_cell_.Wi);
-        write_vector(file, lstm_cell_.Wc);
-        write_vector(file, lstm_cell_.Wo);
-        write_vector(file, lstm_cell_.Uf);
-        write_vector(file, lstm_cell_.Ui);
-        write_vector(file, lstm_cell_.Uc);
-        write_vector(file, lstm_cell_.Uo);
-        write_vector(file, lstm_cell_.bf);
-        write_vector(file, lstm_cell_.bi);
-        write_vector(file, lstm_cell_.bc);
-        write_vector(file, lstm_cell_.bo);
-        
-        // Write output layer
-        write_vector(file, output_layer_.W);
-        file.write(reinterpret_cast<const char*>(&output_layer_.b), sizeof(output_layer_.b));
-        
-        // Write statistics
-        file.write(reinterpret_cast<const char*>(&training_steps_), sizeof(training_steps_));
-        file.write(reinterpret_cast<const char*>(&hit_rate_), sizeof(hit_rate_));
-        file.write(reinterpret_cast<const char*>(&total_predictions_), sizeof(total_predictions_));
-        file.write(reinterpret_cast<const char*>(&correct_predictions_), sizeof(correct_predictions_));
-        
-        file.close();
-        std::cout << "VitalityOracle model saved to: " << path << std::endl;
     }
     
     void load_model(const std::string& path) {
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) {
-            std::cerr << "Failed to load model from: " << path << std::endl;
+        auto sections = SimpleTOMLWriter::read(path);
+        if (sections.empty()) {
+            std::cerr << "[Oracle] Failed to load model from: " << path << std::endl;
             return;
         }
         
-        // Read header
-        uint32_t version;
-        file.read(reinterpret_cast<char*>(&version), sizeof(version));
-        if (version != 1) {
-            std::cerr << "Unknown model version: " << version << std::endl;
-            return;
+        for (const auto& [section_name, content] : sections) {
+            if (section_name == "header") {
+                training_steps_ = std::stoul(SimpleTOMLWriter::get_value(content, "training_steps"));
+                hit_rate_ = std::stof(SimpleTOMLWriter::get_value(content, "hit_rate"));
+                total_predictions_ = std::stoul(SimpleTOMLWriter::get_value(content, "total_predictions"));
+                correct_predictions_ = std::stoul(SimpleTOMLWriter::get_value(content, "correct_predictions"));
+                base_learning_rate_ = std::stof(SimpleTOMLWriter::get_value(content, "learning_rate"));
+            } else if (section_name == "lstm_weights") {
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Wf"), lstm_cell_.Wf);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Wi"), lstm_cell_.Wi);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Wc"), lstm_cell_.Wc);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Wo"), lstm_cell_.Wo);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Uf"), lstm_cell_.Uf);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Ui"), lstm_cell_.Ui);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Uc"), lstm_cell_.Uc);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "Uo"), lstm_cell_.Uo);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "bf"), lstm_cell_.bf);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "bi"), lstm_cell_.bi);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "bc"), lstm_cell_.bc);
+                string_to_vector(SimpleTOMLWriter::get_value(content, "bo"), lstm_cell_.bo);
+            } else if (section_name == "output_layer") {
+                string_to_vector(SimpleTOMLWriter::get_value(content, "W"), output_layer_.W);
+                output_layer_.b = std::stof(SimpleTOMLWriter::get_value(content, "b"));
+            }
         }
         
-        // Read LSTM weights
-        read_vector(file, lstm_cell_.Wf);
-        read_vector(file, lstm_cell_.Wi);
-        read_vector(file, lstm_cell_.Wc);
-        read_vector(file, lstm_cell_.Wo);
-        read_vector(file, lstm_cell_.Uf);
-        read_vector(file, lstm_cell_.Ui);
-        read_vector(file, lstm_cell_.Uc);
-        read_vector(file, lstm_cell_.Uo);
-        read_vector(file, lstm_cell_.bf);
-        read_vector(file, lstm_cell_.bi);
-        read_vector(file, lstm_cell_.bc);
-        read_vector(file, lstm_cell_.bo);
+        std::cout << "[Oracle] Model loaded from TOML: " << path 
+                 << " (training_steps: " << training_steps_ << ")" << std::endl;
+    }
+    
+    // Helper functions for TOML serialization
+    std::string vector_to_string(const std::vector<float>& vec) {
+        std::stringstream ss;
+        ss << "[";
+        for (size_t i = 0; i < vec.size(); ++i) {
+            ss << std::fixed << std::setprecision(8) << vec[i];
+            if (i < vec.size() - 1) ss << ", ";
+        }
+        ss << "]";
+        return ss.str();
+    }
+    
+    void string_to_vector(const std::string& str, std::vector<float>& vec) {
+        vec.clear();
+        if (str.empty() || str[0] != '[' || str.back() != ']') return;
         
-        // Read output layer
-        read_vector(file, output_layer_.W);
-        file.read(reinterpret_cast<char*>(&output_layer_.b), sizeof(output_layer_.b));
+        std::string content = str.substr(1, str.length() - 2);
+        std::stringstream ss(content);
+        std::string value;
         
-        // Read statistics
-        file.read(reinterpret_cast<char*>(&training_steps_), sizeof(training_steps_));
-        file.read(reinterpret_cast<char*>(&hit_rate_), sizeof(hit_rate_));
-        file.read(reinterpret_cast<char*>(&total_predictions_), sizeof(total_predictions_));
-        file.read(reinterpret_cast<char*>(&correct_predictions_), sizeof(correct_predictions_));
-        
-        file.close();
-        std::cout << "VitalityOracle model loaded from: " << path 
-                 << ", training_steps: " << training_steps_ << std::endl;
+        while (std::getline(ss, value, ',')) {
+            // Trim whitespace
+            size_t start = value.find_first_not_of(" \t");
+            size_t end = value.find_last_not_of(" \t");
+            if (start != std::string::npos) {
+                value = value.substr(start, end - start + 1);
+                vec.push_back(std::stof(value));
+            }
+        }
     }
     
     float hit_rate() const { return hit_rate_; }

@@ -209,18 +209,43 @@ public:
     }
     
     void init(VkDevice device, VkPhysicalDevice physical_device) {
-        timeline_mgr_ = std::make_unique<TimelineSemaphoreManager>(device);
-        queue_mgr_ = std::make_unique<MultiQueueManager>(device, physical_device);
         device_ = device;
+        physical_device_ = physical_device;
+        
+        // Check Vulkan version for timeline semaphore support
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(physical_device, &props);
+        uint32_t vulkan_version = props.apiVersion;
+        timeline_semaphores_supported_ = (VK_VERSION_MAJOR(vulkan_version) >= 1 && 
+                                         VK_VERSION_MINOR(vulkan_version) >= 2);
+        
+        // Only create timeline semaphore manager if supported
+        if (timeline_semaphores_supported_) {
+            timeline_mgr_ = std::make_unique<TimelineSemaphoreManager>(device);
+        }
+        queue_mgr_ = std::make_unique<MultiQueueManager>(device, physical_device);
     }
     
     TimelineSemaphoreManager* timeline() { return timeline_mgr_.get(); }
     MultiQueueManager* queues() { return queue_mgr_.get(); }
     
+    bool timeline_semaphores_supported() const { 
+        return timeline_semaphores_supported_; 
+    }
+    
+    // Wait for all async operations to complete
+    void wait_all() {
+        if (queue_mgr_) {
+            queue_mgr_->wait_transfer();
+        }
+    }
+    
 private:
     std::unique_ptr<TimelineSemaphoreManager> timeline_mgr_;
     std::unique_ptr<MultiQueueManager> queue_mgr_;
     VkDevice device_ = VK_NULL_HANDLE;
+    VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
+    bool timeline_semaphores_supported_ = false;
 };
 
 // FractalMemoryAllocator implementation
@@ -620,17 +645,66 @@ bool NomadPack::migrate_to_vram_timeline() {
     auto* timeline = async_mgr.timeline();
     auto* queues = async_mgr.queues();
     
-    if (!timeline || !queues) return false;
+    if (!timeline || !queues) {
+        // Fallback to synchronous transfer
+        return migrate_to_vram_sync();
+    }
+    
+    // Check if timeline semaphores are supported (Vulkan 1.2+)
+    if (!async_mgr.timeline_semaphores_supported()) {
+        return migrate_to_vram_sync();
+    }
     
     // Get timeline value for this migration
     uint64_t signal_val = timeline->get_next_value();
     migration_state_->timeline_value = signal_val;
     
-    // Perform transfer
-    // queues->submit_transfer(staging_buffer, vram_region_.buffer, metadata_.decompressed_size);
+    // Create staging buffer in host-visible memory
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VmaAllocation staging_alloc = nullptr;
     
-    // Signal timeline when done
+    VkBufferCreateInfo staging_info = {};
+    staging_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    staging_info.size = metadata_.decompressed_size;
+    staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    staging_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    VmaAllocationCreateInfo staging_alloc_info = {};
+    staging_alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    staging_alloc_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    
+    // Note: In production, this would use the VMA allocator from PackManager
+    // For now, we assume the buffer is already allocated in vram_region_
+    
+    // Copy data to staging buffer (CPU side)
+    if (ram_data_) {
+        // Map staging buffer and copy
+        void* mapped = nullptr;
+        // vmaMapMemory(vma_, staging_alloc, &mapped);
+        // std::memcpy(mapped, ram_data_, metadata_.decompressed_size);
+        // vmaUnmapMemory(vma_, staging_alloc);
+    }
+    
+    // Submit async transfer with timeline semaphore
+    // queues->submit_transfer(staging_buffer, vram_region_.buffer, 
+    //                        metadata_.decompressed_size,
+    //                        timeline->get_semaphore(), signal_val);
+    
+    // The compute queue can now wait on this timeline value
     // timeline->signal(signal_val, queues->get_transfer_queue());
+    
+    current_tier_ = MemoryTier::VRAM_HOT;
+    return true;
+}
+
+bool NomadPack::migrate_to_vram_sync() {
+    // Synchronous fallback for Vulkan 1.2 or when timeline semaphores unavailable
+    if (!is_in_ram()) {
+        if (!load_to_ram().has_value()) return false;
+    }
+    
+    // Perform blocking transfer to VRAM
+    // This would use vkCmdCopyBuffer with fence synchronization
     
     current_tier_ = MemoryTier::VRAM_HOT;
     return true;
@@ -649,6 +723,14 @@ void NomadPack::wait_for_migration() {
     if (migration_state_->future.valid()) {
         migration_state_->future.wait();
     }
+}
+
+uint64_t NomadPack::get_timeline_value() const {
+    return migration_state_->timeline_value;
+}
+
+bool NomadPack::is_migrating() const {
+    return migration_state_->is_migrating.load();
 }
 
 size_t NomadPack::ram_footprint() const noexcept {

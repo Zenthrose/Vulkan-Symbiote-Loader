@@ -24,6 +24,17 @@ public:
         bool supports_fp16 = true;
         bool supports_int8 = false;
         uint32_t max_push_constant_size = 128;
+        
+        // Cooperative matrix support
+        bool supports_cooperative_matrix = false;
+        uint32_t cooperative_matrix_m = 16;
+        uint32_t cooperative_matrix_n = 16;
+        uint32_t cooperative_matrix_k = 16;
+        
+        // Device-specific tuning
+        uint32_t optimal_workgroup_size = 256;
+        uint32_t wave_size = 32;
+        bool prefers_warp_shuffle = false;
     };
     
     explicit ShaderRuntime(VkDevice device, VkPhysicalDevice physical_device, VkQueue compute_queue, VkCommandPool command_pool, VkDescriptorPool descriptor_pool);
@@ -71,6 +82,18 @@ public:
                        uint32_t group_count_x,
                        uint32_t group_count_y = 1,
                        uint32_t group_count_z = 1);
+    
+    // Auto-tuning: Optimize shader parameters for this device
+    void auto_tune_shaders();
+    ShaderSpecialization get_optimal_specialization(uint32_t operation_type) const;
+    
+    // Cooperative matrix support
+    bool has_cooperative_matrix() const { return device_caps_.supports_cooperative_matrix; }
+    VkPipeline get_cooperative_matmul_pipeline(const ShaderSpecialization& spec);
+    
+    // Device-specific shader generation
+    std::string generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k);
+    std::string generate_tuned_attention_shader(uint32_t seq_len, uint32_t head_dim);
 
 private:
     VkDevice device_;

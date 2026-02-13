@@ -84,11 +84,64 @@ else
     echo -e "${GREEN}✅ Blosc2 found${NC}"
 fi
 
-# Parse build type
+# Parse build type and target architecture
 BUILD_TYPE="Release"
-if [ "$1" = "debug" ] || [ "$1" = "Debug" ]; then
-    BUILD_TYPE="Debug"
-    echo -e "${BLUE}🔧 Debug build selected${NC}"
+TARGET_ARCH=""
+VULKAN_VERSION="1.3"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        debug|Debug)
+            BUILD_TYPE="Debug"
+            echo -e "${BLUE}🔧 Debug build selected${NC}"
+            shift
+            ;;
+        --arm|--arm64|--aarch64)
+            TARGET_ARCH="arm64"
+            echo -e "${BLUE}🎯 ARM64 build selected${NC}"
+            shift
+            ;;
+        --vulkan-1.2|--vulkan12)
+            VULKAN_VERSION="1.2"
+            echo -e "${YELLOW}⚠️  Vulkan 1.2 fallback mode (no timeline semaphores)${NC}"
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: ./build.sh [options]"
+            echo "Options:"
+            echo "  debug              Build in debug mode"
+            echo "  --arm, --arm64     Build for ARM64 architecture"
+            echo "  --vulkan-1.2       Force Vulkan 1.2 compatibility (no timeline semaphores)"
+            echo "  --help             Show this help message"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Detect architecture if not specified
+if [ -z "$TARGET_ARCH" ]; then
+    TARGET_ARCH=$(uname -m)
+    case $TARGET_ARCH in
+        x86_64|amd64)
+            TARGET_ARCH="x86_64"
+            echo -e "${BLUE}🖥️  Detected x86_64 architecture${NC}"
+            ;;
+        aarch64|arm64)
+            TARGET_ARCH="arm64"
+            echo -e "${BLUE}🖥️  Detected ARM64 architecture${NC}"
+            ;;
+        armv7l|armhf)
+            TARGET_ARCH="armv7"
+            echo -e "${BLUE}🖥️  Detected ARMv7 architecture${NC}"
+            ;;
+        *)
+            echo -e "${YELLOW}⚠️  Unknown architecture: ${TARGET_ARCH}, defaulting to x86_64${NC}"
+            TARGET_ARCH="x86_64"
+            ;;
+    esac
 fi
 
 # Create build directory
@@ -111,7 +164,32 @@ CMAKE_ARGS=(
     "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
     "-DCMAKE_CXX_STANDARD=20"
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    "-DVULKAN_VERSION=${VULKAN_VERSION}"
+    "-DTARGET_ARCH=${TARGET_ARCH}"
 )
+
+# Architecture-specific compiler flags
+if [ "$TARGET_ARCH" = "arm64" ] || [ "$TARGET_ARCH" = "aarch64" ]; then
+    echo -e "${BLUE}🔧 Adding ARM64 optimization flags...${NC}"
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-march=armv8-a+fp+simd -mtune=cortex-a72")
+    CMAKE_ARGS+=("-DENABLE_ARM_NEON=ON")
+elif [ "$TARGET_ARCH" = "armv7" ]; then
+    echo -e "${BLUE}🔧 Adding ARMv7 optimization flags...${NC}"
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-march=armv7-a -mfpu=neon -mfloat-abi=hard")
+    CMAKE_ARGS+=("-DENABLE_ARM_NEON=ON")
+else
+    # x86_64 optimizations
+    echo -e "${BLUE}🔧 Adding x86_64 optimization flags...${NC}"
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-march=native -mtune=native")
+fi
+
+# Vulkan 1.2 fallback (no timeline semaphores)
+if [ "$VULKAN_VERSION" = "1.2" ]; then
+    CMAKE_ARGS+=("-DVULKAN_1_2_FALLBACK=ON")
+    CMAKE_ARGS+=("-DENABLE_TIMELINE_SEMAPHORES=OFF")
+else
+    CMAKE_ARGS+=("-DENABLE_TIMELINE_SEMAPHORES=ON")
+fi
 
 # Add VMA include if found
 if [ -n "$VMA_INCLUDE_DIR" ]; then

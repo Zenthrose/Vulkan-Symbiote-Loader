@@ -35,6 +35,28 @@ struct PerformanceConfig {
     float scale_factor = 1.0f;
 };
 
+struct PowerConfig {
+    bool enable_power_saver = false;
+    bool auto_detect_battery = true;
+    uint32 power_profile = 1;  // 0=high_perf, 1=balanced, 2=power_saver
+    uint32 battery_threshold_percent = 30;
+    bool throttle_on_thermal = true;
+    uint32 max_workgroup_size_battery = 64;
+    uint32 prefetch_lookahead_battery = 1;
+    bool disable_profiling_on_battery = true;
+};
+
+struct BenchmarkConfig {
+    bool enable_benchmark_mode = false;
+    uint32 warmup_tokens = 10;
+    uint32 benchmark_tokens = 100;
+    uint32 iterations = 3;
+    bool output_json = false;
+    std::string output_file = "benchmark_results.json";
+    bool test_power_modes = true;
+    bool test_memory_pressure = true;
+};
+
 struct LoggingConfig {
     LogLevel log_level = LogLevel::INFO;
     bool log_to_file = false;
@@ -65,6 +87,14 @@ public:
     const LoggingConfig& logging() const { return logging_config_; }
     void set_logging(const LoggingConfig& config) { logging_config_ = config; }
     
+    // Power management configuration
+    const PowerConfig& power() const { return power_config_; }
+    void set_power(const PowerConfig& config) { power_config_ = config; }
+    
+    // Benchmark configuration
+    const BenchmarkConfig& benchmark() const { return benchmark_config_; }
+    void set_benchmark(const BenchmarkConfig& config) { benchmark_config_ = config; }
+    
     // Model configuration
     const std::string& model_path() const { return model_path_; }
     void set_model_path(const std::string& path) { model_path_ = path; }
@@ -83,6 +113,8 @@ private:
     MemoryConfig memory_config_;
     PerformanceConfig perf_config_;
     LoggingConfig logging_config_;
+    PowerConfig power_config_;
+    BenchmarkConfig benchmark_config_;
     std::string model_path_;
     
     static std::unique_ptr<ConfigManager> instance_;
@@ -92,6 +124,8 @@ private:
     void parse_memory_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_performance_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_logging_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
+    void parse_power_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
+    void parse_benchmark_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
 };
 
 } // namespace vk_symbiote

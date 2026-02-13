@@ -50,6 +50,15 @@ public:
 
     void save_model(const std::string& path);
     void load_model(const std::string& path);
+    
+    // Entropy-based code detection
+    float calculate_token_entropy(const std::vector<uint32>& tokens);
+    bool is_code_prompt(const std::vector<uint32>& tokens);
+    
+    // SGD training configuration
+    void set_learning_rate(float lr);
+    float get_learning_rate() const;
+    void enable_sgd_training(bool enable);
 
 private:
     class VitalityOracleImpl;

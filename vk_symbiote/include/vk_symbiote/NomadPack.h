@@ -93,10 +93,16 @@ public:
     uint32 access_count() const noexcept { return access_count_; }
     void increment_access_count() { access_count_++; }
     
-    // Async migration support
+    // Async migration support with timeline semaphores
     ExpectedVoid migrate_async(MemoryTier target_tier, std::function<void(bool)> completion_callback = nullptr);
     bool is_migration_complete() const;
     void wait_for_migration();
+    
+    // Timeline semaphore value for async GPU operations (0 if not using timelines)
+    uint64_t get_timeline_value() const;
+    
+    // Check if currently migrating
+    bool is_migrating() const;
     
 private:
     PackMetadata metadata_; 
@@ -119,6 +125,11 @@ private:
     Expected<std::vector<float>> decompress_blosc();
     Expected<std::vector<float>> decompress_raw();
     ExpectedVoid read_from_disk(std::vector<uint8_t>& buffer);
+    
+    // Migration implementations
+    bool perform_migration(MemoryTier target_tier);
+    bool migrate_to_vram_timeline();  // Async with timeline semaphores
+    bool migrate_to_vram_sync();       // Synchronous fallback
 };
 
 class PackManager {

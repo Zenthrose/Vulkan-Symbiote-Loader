@@ -119,6 +119,26 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     file << "log_memory_usage=" << (logging_config_.log_memory_usage ? "true" : "false") << std::endl;
     file << "max_log_file_size_mb=" << logging_config_.max_log_file_size_mb << std::endl;
     
+    file << "[power]" << std::endl;
+    file << "enable_power_saver=" << (power_config_.enable_power_saver ? "true" : "false") << std::endl;
+    file << "auto_detect_battery=" << (power_config_.auto_detect_battery ? "true" : "false") << std::endl;
+    file << "power_profile=" << power_config_.power_profile << std::endl;
+    file << "battery_threshold_percent=" << power_config_.battery_threshold_percent << std::endl;
+    file << "throttle_on_thermal=" << (power_config_.throttle_on_thermal ? "true" : "false") << std::endl;
+    file << "max_workgroup_size_battery=" << power_config_.max_workgroup_size_battery << std::endl;
+    file << "prefetch_lookahead_battery=" << power_config_.prefetch_lookahead_battery << std::endl;
+    file << "disable_profiling_on_battery=" << (power_config_.disable_profiling_on_battery ? "true" : "false") << std::endl;
+    
+    file << "[benchmark]" << std::endl;
+    file << "enable_benchmark_mode=" << (benchmark_config_.enable_benchmark_mode ? "true" : "false") << std::endl;
+    file << "warmup_tokens=" << benchmark_config_.warmup_tokens << std::endl;
+    file << "benchmark_tokens=" << benchmark_config_.benchmark_tokens << std::endl;
+    file << "iterations=" << benchmark_config_.iterations << std::endl;
+    file << "output_json=" << (benchmark_config_.output_json ? "true" : "false") << std::endl;
+    file << "output_file=" << benchmark_config_.output_file << std::endl;
+    file << "test_power_modes=" << (benchmark_config_.test_power_modes ? "true" : "false") << std::endl;
+    file << "test_memory_pressure=" << (benchmark_config_.test_memory_pressure ? "true" : "false") << std::endl;
+    
     file << "[model]" << std::endl;
     file << "model_path=" << model_path_ << std::endl;
     
@@ -172,6 +192,28 @@ void ConfigManager::set_defaults() {
         .log_performance = true,
         .log_memory_usage = true,
         .max_log_file_size_mb = 100
+    };
+    
+    power_config_ = {
+        .enable_power_saver = false,
+        .auto_detect_battery = true,
+        .power_profile = 1,  // balanced
+        .battery_threshold_percent = 30,
+        .throttle_on_thermal = true,
+        .max_workgroup_size_battery = 64,
+        .prefetch_lookahead_battery = 1,
+        .disable_profiling_on_battery = true
+    };
+    
+    benchmark_config_ = {
+        .enable_benchmark_mode = false,
+        .warmup_tokens = 10,
+        .benchmark_tokens = 100,
+        .iterations = 3,
+        .output_json = false,
+        .output_file = "benchmark_results.json",
+        .test_power_modes = true,
+        .test_memory_pressure = true
     };
     
     model_path_ = "";
@@ -309,3 +351,73 @@ void ConfigManager::print_config() const {
 }
 
 } // namespace vk_symbiote
+void ConfigManager::parse_power_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config) {
+    auto it = config.find("enable_power_saver");
+    if (it != config.end()) {
+        power_config_.enable_power_saver = std::get<int>(it->second) != 0;
+    }
+    it = config.find("auto_detect_battery");
+    if (it != config.end()) {
+        power_config_.auto_detect_battery = std::get<int>(it->second) != 0;
+    }
+    it = config.find("power_profile");
+    if (it != config.end()) {
+        power_config_.power_profile = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("battery_threshold_percent");
+    if (it != config.end()) {
+        power_config_.battery_threshold_percent = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("throttle_on_thermal");
+    if (it != config.end()) {
+        power_config_.throttle_on_thermal = std::get<int>(it->second) != 0;
+    }
+    it = config.find("max_workgroup_size_battery");
+    if (it != config.end()) {
+        power_config_.max_workgroup_size_battery = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("prefetch_lookahead_battery");
+    if (it != config.end()) {
+        power_config_.prefetch_lookahead_battery = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("disable_profiling_on_battery");
+    if (it != config.end()) {
+        power_config_.disable_profiling_on_battery = std::get<int>(it->second) != 0;
+    }
+}
+
+void ConfigManager::parse_benchmark_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config) {
+    auto it = config.find("enable_benchmark_mode");
+    if (it != config.end()) {
+        benchmark_config_.enable_benchmark_mode = std::get<int>(it->second) != 0;
+    }
+    it = config.find("warmup_tokens");
+    if (it != config.end()) {
+        benchmark_config_.warmup_tokens = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("benchmark_tokens");
+    if (it != config.end()) {
+        benchmark_config_.benchmark_tokens = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("iterations");
+    if (it != config.end()) {
+        benchmark_config_.iterations = static_cast<uint32>(std::get<int>(it->second));
+    }
+    it = config.find("output_json");
+    if (it != config.end()) {
+        benchmark_config_.output_json = std::get<int>(it->second) != 0;
+    }
+    it = config.find("output_file");
+    if (it != config.end()) {
+        benchmark_config_.output_file = std::get<std::string>(it->second);
+    }
+    it = config.find("test_power_modes");
+    if (it != config.end()) {
+        benchmark_config_.test_power_modes = std::get<int>(it->second) != 0;
+    }
+    it = config.find("test_memory_pressure");
+    if (it != config.end()) {
+        benchmark_config_.test_memory_pressure = std::get<int>(it->second) != 0;
+    }
+}
+

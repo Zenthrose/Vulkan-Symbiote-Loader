@@ -54,6 +54,9 @@ VulkanSymbioteEngine::~VulkanSymbioteEngine() {
 }
 
 ExpectedVoid VulkanSymbioteEngine::initialize_vulkan() {
+    // Load configuration from ConfigManager
+    auto& config = ConfigManager::instance();
+    
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pApplicationName = "Vulkan Symbiote Engine";
@@ -69,6 +72,21 @@ ExpectedVoid VulkanSymbioteEngine::initialize_vulkan() {
     VkResult result = vkCreateInstance(&instance_info, nullptr, &instance_);
     if (result != VK_SUCCESS) {
         return ExpectedVoid(static_cast<int>(result));
+    }
+    
+    // Apply power profile from config
+    const auto& power_config = config.power();
+    if (power_config.power_profile == 0) {
+        set_power_profile(PowerProfile::HIGH_PERFORMANCE);
+    } else if (power_config.power_profile == 2) {
+        set_power_profile(PowerProfile::POWER_SAVER);
+    } else {
+        set_power_profile(PowerProfile::BALANCED);
+    }
+    
+    // Enable battery detection if configured
+    if (power_config.auto_detect_battery) {
+        detect_power_source();
     }
 
     uint32_t device_count = 0;
