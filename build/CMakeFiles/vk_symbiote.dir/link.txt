@@ -1,2 +1,0 @@
-/usr/bin/ar qc libvk_symbiote.a CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o CMakeFiles/vk_symbiote.dir/src/NomadPack.cpp.o CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o CMakeFiles/vk_symbiote.dir/src/Tokenizer.cpp.o CMakeFiles/vk_symbiote.dir/src/Compression.cpp.o CMakeFiles/vk_symbiote.dir/src/Utils.cpp.o CMakeFiles/vk_symbiote.dir/src/ConfigManager.cpp.o
-/usr/bin/ranlib libvk_symbiote.a

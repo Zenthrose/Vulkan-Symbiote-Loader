@@ -80,8 +80,7 @@ set(VMA_LIBRARIES "")
 
 message(STATUS "Found VMA header: ${VMA_INCLUDE_DIRS}/vk_mem_alloc.h")
 
-# Find compression backends
-add_subdirectory(../compression ${CMAKE_BINARY_DIR}/compression)
+# Note: compression subdirectory is added by root CMakeLists.txt
 
 # Find ZFP for hybrid compression
 if(ENABLE_ZFP)

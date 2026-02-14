@@ -94,8 +94,16 @@ public:
     // Device-specific shader generation
     std::string generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k);
     std::string generate_tuned_attention_shader(uint32_t seq_len, uint32_t head_dim);
+    std::string generate_cooperative_matmul_shader();
 
 private:
+    // Vendor-specific tuning functions
+    void tune_for_nvidia(const VkPhysicalDeviceProperties& props);
+    void tune_for_amd(const VkPhysicalDeviceProperties& props);
+    void tune_for_intel(const VkPhysicalDeviceProperties& props);
+    void tune_for_arm(const VkPhysicalDeviceProperties& props);
+    void tune_generic(const VkPhysicalDeviceProperties& props);
+    bool check_cooperative_matrix_support();
     VkDevice device_;
     VkPhysicalDevice physical_device_;
     VkQueue compute_queue_;

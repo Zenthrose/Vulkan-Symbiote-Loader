@@ -5,6 +5,9 @@
 #include <fstream>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
+#include <chrono>
+#include <random>
 
 namespace vk_symbiote {
 
@@ -67,10 +70,13 @@ static std::vector<uint32_t> generate_minimal_spirv() {
     return spirv;
 }
 
-ShaderRuntime::ShaderRuntime(VkDevice device, VkPhysicalDevice physical_device, VkQueue compute_queue, VkCommandPool command_pool, VkDescriptorPool descriptor_pool) : device_(device), physical_device_(physical_device), compute_queue_(compute_queue), command_pool_(command_pool), descriptor_pool_(descriptor_pool), pipeline_cache_(VK_NULL_HANDLE) {
+ShaderRuntime::ShaderRuntime(VkDevice device, VkPhysicalDevice physical_device, VkQueue compute_queue, VkCommandPool command_pool, VkDescriptorPool descriptor_pool) 
+    : device_(device), physical_device_(physical_device), compute_queue_(compute_queue), command_pool_(command_pool), descriptor_pool_(descriptor_pool), pipeline_cache_(VK_NULL_HANDLE) {
+    
+    // Query device capabilities first
     device_caps_ = query_device_capabilities();
     
-    // Auto-tune shaders based on device capabilities
+    // Auto-tune shaders based on device properties
     auto_tune_shaders();
     
     descriptor_set_layout_ = create_descriptor_set_layout();
@@ -124,6 +130,451 @@ VkPipeline ShaderRuntime::create_specialized_pipeline(VkShaderModule shader_modu
     return (result == VK_SUCCESS) ? pipeline : VK_NULL_HANDLE;
 }
 
+// ============================================================================
+// Auto-Tune System with Device Property Detection
+// ============================================================================
+void ShaderRuntime::auto_tune_shaders() {
+    std::cout << "[ShaderRuntime] Auto-tuning shaders for device..." << std::endl;
+    
+    // Query device properties
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(physical_device_, &props);
+    
+    VkPhysicalDeviceSubgroupProperties subgroup_props = {};
+    subgroup_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    
+    VkPhysicalDeviceProperties2 props2 = {};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &subgroup_props;
+    
+    vkGetPhysicalDeviceProperties2(physical_device_, &props2);
+    
+    // Query cooperative matrix properties
+    if (device_caps_.supports_cooperative_matrix) {
+        VkPhysicalDeviceCooperativeMatrixPropertiesNV coop_matrix_props = {};
+        coop_matrix_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_NV;
+        
+        VkPhysicalDeviceProperties2 coop_props2 = {};
+        coop_props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        coop_props2.pNext = &coop_matrix_props;
+        
+        vkGetPhysicalDeviceProperties2(physical_device_, &coop_props2);
+        
+        std::cout << "[ShaderRuntime] Cooperative matrix supported" << std::endl;
+    }
+    
+    // Vendor-specific tuning based on deviceID
+    uint32_t vendor_id = props.vendorID;
+    std::string device_name(props.deviceName);
+    
+    std::cout << "[ShaderRuntime] Device: " << device_name << " (Vendor: 0x" << std::hex << vendor_id << std::dec << ")" << std::endl;
+    
+    if (vendor_id == 0x10DE) {  // NVIDIA
+        tune_for_nvidia(props);
+    } else if (vendor_id == 0x1002 || vendor_id == 0x1022) {  // AMD
+        tune_for_amd(props);
+    } else if (vendor_id == 0x8086 || vendor_id == 0x8087) {  // Intel
+        tune_for_intel(props);
+    } else if (vendor_id == 0x13B5) {  // ARM Mali
+        tune_for_arm(props);
+    } else {
+        // Conservative defaults
+        tune_generic(props);
+    }
+    
+    // Set subgroup size from query
+    device_caps_.subgroup_size = subgroup_props.subgroupSize;
+    
+    std::cout << "[ShaderRuntime] Auto-tune complete:" << std::endl;
+    std::cout << "  Optimal workgroup: " << device_caps_.optimal_workgroup_size << std::endl;
+    std::cout << "  Wave size: " << device_caps_.wave_size << std::endl;
+    std::cout << "  Subgroup: " << device_caps_.subgroup_size << std::endl;
+    std::cout << "  Cooperative matrix: " << (device_caps_.supports_cooperative_matrix ? "yes" : "no") << std::endl;
+    if (device_caps_.supports_cooperative_matrix) {
+        std::cout << "  Matrix dims: " << device_caps_.cooperative_matrix_m << "x" 
+                  << device_caps_.cooperative_matrix_n << "x" << device_caps_.cooperative_matrix_k << std::endl;
+    }
+}
+
+void ShaderRuntime::tune_for_nvidia(const VkPhysicalDeviceProperties& props) {
+    // NVIDIA Ampere/Ada optimal settings
+    device_caps_.optimal_workgroup_size = 256;  // Ampere/Ada optimal
+    device_caps_.wave_size = 32;
+    device_caps_.prefers_warp_shuffle = true;
+    
+    // Check for cooperative matrix support (RTX 20 series+)
+    if (props.apiVersion >= VK_API_VERSION_1_2) {
+        device_caps_.supports_cooperative_matrix = check_cooperative_matrix_support();
+        if (device_caps_.supports_cooperative_matrix) {
+            // NVIDIA uses 16x16x16 for optimal tensor core utilization
+            device_caps_.cooperative_matrix_m = 16;
+            device_caps_.cooperative_matrix_n = 16;
+            device_caps_.cooperative_matrix_k = 16;
+        }
+    }
+    
+    // Turing/Ampere/Ada have different optimal workgroup sizes
+    if (strstr(props.deviceName, "RTX")) {
+        // RTX series - use larger workgroups for better occupancy
+        device_caps_.optimal_workgroup_size = 512;
+    }
+    
+    std::cout << "[ShaderRuntime] Tuned for NVIDIA GPU" << std::endl;
+}
+
+void ShaderRuntime::tune_for_amd(const VkPhysicalDeviceProperties& props) {
+    // AMD RDNA/CDNA optimal settings
+    device_caps_.optimal_workgroup_size = 256;  // RDNA optimal
+    device_caps_.wave_size = 64;  // AMD wave64
+    device_caps_.prefers_warp_shuffle = true;
+    
+    // Check for matrix core support (RDNA2/CDNA)
+    device_caps_.supports_cooperative_matrix = check_cooperative_matrix_support();
+    if (device_caps_.supports_cooperative_matrix) {
+        // AMD uses 16x16x16
+        device_caps_.cooperative_matrix_m = 16;
+        device_caps_.cooperative_matrix_n = 16;
+        device_caps_.cooperative_matrix_k = 16;
+    }
+    
+    std::cout << "[ShaderRuntime] Tuned for AMD GPU" << std::endl;
+}
+
+void ShaderRuntime::tune_for_intel(const VkPhysicalDeviceProperties& props) {
+    // Intel Xe optimal settings
+    device_caps_.optimal_workgroup_size = 128;  // Xe optimal
+    device_caps_.wave_size = 8;  // Xe uses SIMD8 for compute
+    device_caps_.prefers_warp_shuffle = false;
+    
+    // Intel Xe Matrix Extensions (XMX)
+    device_caps_.supports_cooperative_matrix = check_cooperative_matrix_support();
+    if (device_caps_.supports_cooperative_matrix) {
+        device_caps_.cooperative_matrix_m = 8;
+        device_caps_.cooperative_matrix_n = 8;
+        device_caps_.cooperative_matrix_k = 16;
+    }
+    
+    std::cout << "[ShaderRuntime] Tuned for Intel GPU" << std::endl;
+}
+
+void ShaderRuntime::tune_for_arm(const VkPhysicalDeviceProperties& props) {
+    // ARM Mali optimal settings
+    device_caps_.optimal_workgroup_size = 64;
+    device_caps_.wave_size = 4;  // Mali uses quad-based execution
+    device_caps_.prefers_warp_shuffle = false;
+    device_caps_.supports_cooperative_matrix = false;  // Limited support
+    
+    std::cout << "[ShaderRuntime] Tuned for ARM Mali GPU" << std::endl;
+}
+
+void ShaderRuntime::tune_generic(const VkPhysicalDeviceProperties& props) {
+    // Conservative defaults for unknown hardware
+    device_caps_.optimal_workgroup_size = 128;
+    device_caps_.wave_size = 32;
+    device_caps_.prefers_warp_shuffle = false;
+    device_caps_.supports_cooperative_matrix = check_cooperative_matrix_support();
+    
+    if (device_caps_.supports_cooperative_matrix) {
+        device_caps_.cooperative_matrix_m = 16;
+        device_caps_.cooperative_matrix_n = 16;
+        device_caps_.cooperative_matrix_k = 16;
+    }
+    
+    std::cout << "[ShaderRuntime] Tuned for generic GPU" << std::endl;
+}
+
+bool ShaderRuntime::check_cooperative_matrix_support() {
+    // Check for VK_KHR_cooperative_matrix extension
+    uint32_t extension_count = 0;
+    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, nullptr);
+    
+    if (extension_count == 0) return false;
+    
+    std::vector<VkExtensionProperties> extensions(extension_count);
+    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, extensions.data());
+    
+    for (const auto& ext : extensions) {
+        if (strcmp(ext.extensionName, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) {
+            // Also need to check for VK_NV_cooperative_matrix for NVIDIA
+            return true;
+        }
+        if (strcmp(ext.extensionName, VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+ShaderRuntime::ShaderSpecialization ShaderRuntime::get_optimal_specialization(uint32_t operation_type) const {
+    ShaderSpecialization spec;
+    
+    switch (operation_type) {
+        case 0: // Matmul - use cooperative matrices if available
+            if (device_caps_.supports_cooperative_matrix) {
+                spec.workgroup_size_x = device_caps_.cooperative_matrix_m * 2;  // 2 warps per matrix
+                spec.workgroup_size_y = device_caps_.cooperative_matrix_n / 8;
+                spec.use_subgroup_ops = true;
+                spec.subgroup_size = device_caps_.subgroup_size;
+                spec.use_fp16_math = device_caps_.supports_fp16;
+            } else {
+                spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
+                spec.workgroup_size_y = 1;
+                spec.use_subgroup_ops = device_caps_.prefers_warp_shuffle;
+                spec.subgroup_size = device_caps_.subgroup_size;
+                spec.use_fp16_math = device_caps_.supports_fp16;
+            }
+            break;
+            
+        case 1: // Attention
+            spec.workgroup_size_x = 16;
+            spec.workgroup_size_y = 16;
+            spec.use_subgroup_ops = true;
+            spec.subgroup_size = device_caps_.subgroup_size;
+            spec.use_fp16_math = device_caps_.supports_fp16;
+            break;
+            
+        case 2: // RMS Norm
+            spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
+            spec.workgroup_size_y = 1;
+            spec.use_subgroup_ops = true;
+            spec.subgroup_size = device_caps_.subgroup_size;
+            spec.use_fp16_math = false;  // Keep precision for norms
+            break;
+            
+        default:
+            spec.workgroup_size_x = 128;
+            spec.workgroup_size_y = 1;
+            spec.use_subgroup_ops = false;
+            spec.use_fp16_math = false;
+            break;
+    }
+    
+    return spec;
+}
+
+// ============================================================================
+// Cooperative Matrix Shader Generation
+// ============================================================================
+VkPipeline ShaderRuntime::get_cooperative_matmul_pipeline(const ShaderSpecialization& spec) {
+    if (!device_caps_.supports_cooperative_matrix) {
+        std::cerr << "[ShaderRuntime] Cooperative matrices not supported, using standard matmul" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    // Generate cooperative matrix shader
+    std::string shader_source = generate_cooperative_matmul_shader();
+    
+    auto shader_result = compile_glsl_to_spirv(shader_source, {});
+    if (!shader_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to compile cooperative matrix shader" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    std::vector<uint32_t> spec_data;
+    VkSpecializationInfo spec_info = create_specialization_info(spec, spec_data);
+    
+    VkComputePipelineCreateInfo pipeline_info = create_compute_pipeline_info(
+        shader_result.value(), pipeline_layout_, &spec_info);
+    
+    VkPipeline pipeline;
+    VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, 
+                                             &pipeline_info, nullptr, &pipeline);
+    
+    if (result == VK_SUCCESS) {
+        std::cout << "[ShaderRuntime] Created cooperative matrix pipeline" << std::endl;
+    }
+    
+    return (result == VK_SUCCESS) ? pipeline : VK_NULL_HANDLE;
+}
+
+std::string ShaderRuntime::generate_cooperative_matmul_shader() {
+    std::stringstream ss;
+    
+    ss << "#version 460\n";
+    ss << "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n";
+    ss << "#extension GL_KHR_cooperative_matrix : require\n";
+    ss << "#extension GL_KHR_shader_subgroup : require\n\n";
+    
+    // Use device-specific cooperative matrix dimensions
+    uint32_t M = device_caps_.cooperative_matrix_m;
+    uint32_t N = device_caps_.cooperative_matrix_n;
+    uint32_t K = device_caps_.cooperative_matrix_k;
+    
+    ss << "layout(local_size_x = " << M << ", local_size_y = " << N / 8 << ") in;\n\n";
+    
+    ss << R"(
+layout(push_constant) uniform PushConstants {
+    uint M_total, N_total, K_total;
+} pc;
+
+layout(set = 0, binding = 0) readonly buffer A { f16vec4 a[]; };
+layout(set = 0, binding = 1) readonly buffer B { f16vec4 b[]; };
+layout(set = 0, binding = 2) buffer C { f16vec4 c[]; };
+
+// Cooperative matrix types
+coopmat<f16, gl_ScopeSubgroup, )" << M << ", " << K << ", gl_MatrixUseA> matA;
+coopmat<f16, gl_ScopeSubgroup, )" << K << ", " << N << ", gl_MatrixUseB> matB;
+coopmat<f32, gl_ScopeSubgroup, )" << M << ", " << N << ", gl_MatrixUseAccumulator> matC;
+
+void main() {
+    uint warp_id = gl_SubgroupID;
+    uint warp_m = warp_id % (pc.M_total / )" << M << R"();
+    uint warp_n = warp_id / (pc.M_total / )" << M << R"();
+    
+    // Initialize accumulator to zero
+    coopMatLoad(matC, c, warp_m * )" << M << R"( * pc.N_total + warp_n * )" << N << R"(, pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+    
+    // Compute matrix multiplication using cooperative matrices
+    for (uint k = 0; k < pc.K_total; k += )" << K << R"() {
+        // Load A and B tiles
+        coopMatLoad(matA, a, warp_m * )" << M << R"( * pc.K_total + k, pc.K_total, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(matB, b, k * pc.N_total + warp_n * )" << N << R"(, pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+        
+        // Multiply-accumulate
+        matC = coopMatMulAdd(matA, matB, matC);
+    }
+    
+    // Store result
+    coopMatStore(matC, c, warp_m * )" << M << R"( * pc.N_total + warp_n * )" << N << R"(, pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+}
+)";
+    
+    return ss.str();
+}
+
+std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
+    std::stringstream ss;
+    
+    ss << "#version 460\n";
+    ss << "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n";
+    
+    if (device_caps_.prefers_warp_shuffle) {
+        ss << "#extension GL_KHR_shader_subgroup_shuffle : require\n";
+    }
+    
+    ss << "\nlayout(local_size_x = " << device_caps_.optimal_workgroup_size << ", local_size_y = 1) in;\n\n";
+    
+    ss << R"(
+layout(push_constant) uniform PushConstants {
+    uint M, N, K;
+} pc;
+
+layout(set = 0, binding = 0) readonly buffer A { float16_t a[]; };
+layout(set = 0, binding = 1) readonly buffer B { float16_t b[]; };
+layout(set = 0, binding = 2) buffer C { float16_t c[]; };
+
+shared float16_t tile_a[128][32];
+shared float16_t tile_b[32][128];
+
+void main() {
+    uint global_x = gl_GlobalInvocationID.x;
+    uint global_y = gl_GlobalInvocationID.y;
+    
+    float16_t acc = 0.0hf;
+    
+    // Tiled matrix multiplication with shared memory
+    for (uint tile_k = 0; tile_k < pc.K; tile_k += 32) {
+        // Load tiles cooperatively
+        if (global_y < pc.M && tile_k + gl_LocalInvocationID.x < pc.K) {
+            tile_a[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = 
+                a[global_y * pc.K + tile_k + gl_LocalInvocationID.x];
+        }
+        
+        if (global_x < pc.N && tile_k + gl_LocalInvocationID.y < pc.K) {
+            tile_b[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = 
+                b[(tile_k + gl_LocalInvocationID.y) * pc.N + global_x];
+        }
+        
+        barrier();
+        
+        // Compute partial dot product
+        for (uint k = 0; k < 32 && tile_k + k < pc.K; ++k) {
+            acc += tile_a[gl_LocalInvocationID.y][k] * tile_b[k][gl_LocalInvocationID.x];
+        }
+        
+        barrier();
+    }
+    
+    if (global_y < pc.M && global_x < pc.N) {
+        c[global_y * pc.N + global_x] = acc;
+    }
+}
+)";
+    
+    return ss.str();
+}
+
+std::string ShaderRuntime::generate_tuned_attention_shader(uint32_t seq_len, uint32_t head_dim) {
+    std::stringstream ss;
+    
+    ss << "#version 460\n";
+    ss << "#extension GL_KHR_shader_subgroup : require\n";
+    
+    if (device_caps_.supports_fp16) {
+        ss << "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n";
+    }
+    
+    ss << "\nlayout(local_size_x = " << device_caps_.subgroup_size << ", local_size_y = 1) in;\n\n";
+    
+    ss << R"(
+layout(push_constant) uniform PushConstants {
+    uint seq_len, head_dim, num_heads;
+    float scale;
+} pc;
+
+layout(set = 0, binding = 0) readonly buffer Q { float q[]; };
+layout(set = 0, binding = 1) readonly buffer K { float k[]; };
+layout(set = 0, binding = 2) readonly buffer V { float v[]; };
+layout(set = 0, binding = 3) buffer O { float o[]; };
+
+void main() {
+    uint head = gl_WorkGroupID.x;
+    uint token = gl_GlobalInvocationID.x;
+    
+    if (head >= pc.num_heads || token >= pc.seq_len) return;
+    
+    // Compute attention scores with subgroup optimization
+    float max_score = -1e30;
+    float sum_exp = 0.0;
+    float acc = 0.0;
+    
+    for (uint i = gl_SubgroupInvocationID; i < pc.seq_len; i += gl_SubgroupSize) {
+        float score = 0.0;
+        for (uint d = 0; d < pc.head_dim; ++d) {
+            score += q[token * pc.head_dim * pc.num_heads + head * pc.head_dim + d] *
+                     k[i * pc.head_dim * pc.num_heads + head * pc.head_dim + d];
+        }
+        score *= pc.scale;
+        
+        // Subgroup-level softmax
+        float max_subgroup = subgroupMax(score);
+        max_score = max(max_score, max_subgroup);
+        
+        float exp_score = exp(score - max_score);
+        sum_exp += subgroupAdd(exp_score);
+        
+        // Accumulate weighted values
+        for (uint d = 0; d < pc.head_dim; ++d) {
+            acc += exp_score * v[i * pc.head_dim * pc.num_heads + head * pc.head_dim + d];
+        }
+    }
+    
+    // Write output
+    if (gl_SubgroupInvocationID == 0) {
+        for (uint d = 0; d < pc.head_dim; ++d) {
+            o[token * pc.head_dim * pc.num_heads + head * pc.head_dim + d] = acc / sum_exp;
+        }
+    }
+}
+)";
+    
+    return ss.str();
+}
+
+// ============================================================================
+// Pipeline Getters
+// ============================================================================
 VkPipeline ShaderRuntime::get_fused_matmul_rope_pipeline(const ShaderSpecialization& spec) {
     // Load shader source
     std::string shader_source = R"(
@@ -221,7 +672,7 @@ layout (local_size_x = 16, local_size_y = 16) in;
 layout (push_constant) uniform PushConstants {
     uint seq_len, head_dim, num_heads, num_kv_heads;
     float scale;
-    uint enable_causal_mask; // Causal masking flag
+    uint enable_causal_mask;
 } pc;
 
 layout (set = 0, binding = 0) readonly buffer QBuffer { float q[]; };
@@ -233,7 +684,6 @@ shared float16_t shared_k[16][16];
 shared float16_t shared_v[16][16];
 shared float16_t shared_scores[16][16];
 
-// Causal mask function
 bool is_causal_masked(uint query_pos, uint key_pos) {
     return pc.enable_causal_mask != 0 && key_pos > query_pos;
 }
@@ -244,13 +694,11 @@ void main() {
     
     if (head >= pc.num_heads || token_pos >= pc.seq_len) return;
     
-    // Load Q vector for this head
-    float16_t q_vec[16]; // Assume max head_dim = 16 for this example
+    float16_t q_vec[16];
     for (uint dim = 0; dim < pc.head_dim && dim < 16; ++dim) {
         q_vec[dim] = float16_t(q[token_pos * pc.num_heads * pc.head_dim + head * pc.head_dim + dim]);
     }
     
-    // Compute attention scores with causal masking
     for (uint seq_idx = 0; seq_idx < pc.seq_len; ++seq_idx) {
         float16_t score = 0.0hf;
         
@@ -261,9 +709,8 @@ void main() {
             }
         }
         
-        // Apply causal mask
         if (is_causal_masked(token_pos, seq_idx)) {
-            score = -65504.0hf; // Large negative value for masked positions
+            score = -65504.0hf;
         } else {
             score *= float16_t(pc.scale);
         }
@@ -273,25 +720,18 @@ void main() {
     
     barrier();
     
-    // Softmax computation with subgroup optimization
     for (uint seq_idx = 0; seq_idx < pc.seq_len; ++seq_idx) {
         float16_t score = shared_scores[seq_idx / 16][seq_idx % 16];
         
-        // Find max for softmax
         float16_t max_score = subgroupMax(score);
         float16_t exp_score = exp(score - max_score);
-        
-        // Compute sum for softmax
         float16_t sum_scores = subgroupAdd(exp_score);
-        
-        // Final softmax weight
         float16_t attention_weight = exp_score / (sum_scores + 1e-6hf);
         shared_scores[seq_idx / 16][seq_idx % 16] = attention_weight;
     }
     
     barrier();
     
-    // Value aggregation with proper masking
     float16_t output_vec[16];
     for (uint dim = 0; dim < pc.head_dim && dim < 16; ++dim) {
         output_vec[dim] = 0.0hf;
@@ -310,7 +750,6 @@ void main() {
     
     barrier();
     
-    // Write output
     for (uint dim = 0; dim < pc.head_dim && dim < 16; ++dim) {
         output[token_pos * pc.num_heads * pc.head_dim + head * pc.head_dim + dim] = float(output_vec[dim]);
     }
@@ -361,7 +800,7 @@ void main() {
         up_sum += up_weight[idx * pc.intermediate_size + i] * in_val;
     }
     
-    // SwiGLU activation: Swish(gate) * up
+    // SwiGLU activation
     float16_t swish = gate_sum / (1.0hf + exp(-gate_sum));
     output[idx] = swish * up_sum;
 }
@@ -634,45 +1073,13 @@ ShaderRuntime::DeviceCapabilities ShaderRuntime::query_device_capabilities() con
     caps.supports_subgroup_arithmetic = features.shaderInt64 != 0;
     caps.supports_fp16 = features.shaderFloat64 != 0;
     caps.supports_int8 = features.shaderInt64 != 0;
-
-    // Check for VK_KHR_cooperative_matrix extension
-    uint32_t extension_count = 0;
-    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, nullptr);
-    std::vector<VkExtensionProperties> extensions(extension_count);
-    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, extensions.data());
     
-    for (const auto& ext : extensions) {
-        if (strcmp(ext.extensionName, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) {
-            caps.supports_cooperative_matrix = true;
-            break;
-        }
-    }
-
-    // Vendor-specific tuning
-    std::string vendor_name(properties.deviceName);
-    uint32_t vendor_id = properties.vendorID;
-    
-    if (vendor_id == 0x10DE) {  // NVIDIA
-        caps.optimal_workgroup_size = 256;
-        caps.wave_size = 32;
-        caps.prefers_warp_shuffle = true;
-    } else if (vendor_id == 0x1002 || vendor_id == 0x1022) {  // AMD
-        caps.optimal_workgroup_size = 256;
-        caps.wave_size = 64;
-        caps.prefers_warp_shuffle = true;
-    } else if (vendor_id == 0x8086 || vendor_id == 0x8087) {  // Intel
-        caps.optimal_workgroup_size = 128;
-        caps.wave_size = 8;
-        caps.prefers_warp_shuffle = false;
-    } else if (vendor_id == 0x13B5) {  // ARM Mali
-        caps.optimal_workgroup_size = 64;
-        caps.wave_size = 4;
-        caps.prefers_warp_shuffle = false;
-    } else {
-        // Conservative defaults for unknown hardware
-        caps.optimal_workgroup_size = 128;
-        caps.wave_size = 32;
-        caps.prefers_warp_shuffle = false;
+    // Check for cooperative matrix extension
+    caps.supports_cooperative_matrix = check_cooperative_matrix_support();
+    if (caps.supports_cooperative_matrix) {
+        caps.cooperative_matrix_m = 16;
+        caps.cooperative_matrix_n = 16;
+        caps.cooperative_matrix_k = 16;
     }
 
     return caps;
@@ -818,9 +1225,9 @@ VkSpecializationInfo ShaderRuntime::create_specialization_info(const ShaderSpeci
     return specialization_info;
 }
 
-} // namespace vk_symbiote
-
+// ============================================================================
 // Pipeline Cache Persistence Implementation
+// ============================================================================
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -875,20 +1282,13 @@ void ShaderRuntime::load_pipeline_cache() {
     cache_file.read(cache_data.data(), cache_size);
     cache_file.close();
     
-    // Validate cache header (first 4 bytes should be SPIR-V magic or Vulkan pipeline cache header)
+    // Validate cache header
     if (cache_size < 16) {
         std::cerr << "[ShaderCache] Cache file too small, ignoring" << std::endl;
         return;
     }
     
     // Check for valid Vulkan pipeline cache header
-    // Vulkan pipeline cache header format:
-    // uint32_t header_length
-    // uint32_t header_version
-    // uint32_t vendor_id
-    // uint32_t device_id
-    // uint8_t  pipeline_cache_uuid[VK_UUID_SIZE]
-    
     const uint32_t* header = reinterpret_cast<const uint32_t*>(cache_data.data());
     uint32_t header_length = header[0];
     uint32_t header_version = header[1];
@@ -903,7 +1303,7 @@ void ShaderRuntime::load_pipeline_cache() {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(physical_device_, &props);
     
-    // Compare device UUID (starts at byte 16 in header)
+    // Compare device UUID
     const uint8_t* cache_uuid = reinterpret_cast<const uint8_t*>(cache_data.data()) + 16;
     if (std::memcmp(cache_uuid, props.pipelineCacheUUID, VK_UUID_SIZE) != 0) {
         std::cout << "[ShaderCache] Device UUID mismatch, cache invalidated" << std::endl;
@@ -977,278 +1377,4 @@ void ShaderRuntime::save_pipeline_cache() const {
     std::cout << "[ShaderCache] Saved " << cache_size << " bytes to " << cache_path << std::endl;
 }
 
-
-// ============================================================================
-// Cooperative Matrix Support and Auto-Tuning
-// ============================================================================
-
-void ShaderRuntime::auto_tune_shaders() {
-    std::cout << "[ShaderRuntime] Auto-tuning shaders for device..." << std::endl;
-    
-    // Query device properties
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(physical_device_, &props);
-    
-    VkPhysicalDeviceSubgroupProperties subgroup_props = {};
-    subgroup_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    
-    VkPhysicalDeviceProperties2 props2 = {};
-    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    props2.pNext = &subgroup_props;
-    
-    vkGetPhysicalDeviceProperties2(physical_device_, &props2);
-    
-    // Determine optimal workgroup size based on vendor
-    std::string vendor_name(props.deviceName);
-    if (vendor_name.find("NVIDIA") != std::string::npos) {
-        device_caps_.optimal_workgroup_size = 256;  // Ampere/Ada optimal
-        device_caps_.wave_size = 32;
-        device_caps_.prefers_warp_shuffle = true;
-    } else if (vendor_name.find("AMD") != std::string::npos) {
-        device_caps_.optimal_workgroup_size = 256;  // RDNA/CDNA optimal
-        device_caps_.wave_size = 64;
-        device_caps_.prefers_warp_shuffle = true;
-    } else if (vendor_name.find("Intel") != std::string::npos) {
-        device_caps_.optimal_workgroup_size = 128;  // Xe optimal
-        device_caps_.wave_size = 8;  // Xe uses SIMD8 for compute
-        device_caps_.prefers_warp_shuffle = false;
-    } else {
-        // Default conservative values
-        device_caps_.optimal_workgroup_size = 128;
-        device_caps_.wave_size = 32;
-        device_caps_.prefers_warp_shuffle = false;
-    }
-    
-    // Check for cooperative matrix support (VK_KHR_cooperative_matrix)
-    // This requires Vulkan 1.3 or extension
-    uint32_t extension_count = 0;
-    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, nullptr);
-    std::vector<VkExtensionProperties> extensions(extension_count);
-    vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &extension_count, extensions.data());
-    
-    for (const auto& ext : extensions) {
-        if (strcmp(ext.extensionName, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) {
-            device_caps_.supports_cooperative_matrix = true;
-            device_caps_.cooperative_matrix_m = 16;
-            device_caps_.cooperative_matrix_n = 16;
-            device_caps_.cooperative_matrix_k = 16;
-            std::cout << "[ShaderRuntime] Cooperative matrix enabled: " 
-                     << device_caps_.cooperative_matrix_m << "x" 
-                     << device_caps_.cooperative_matrix_n << "x"
-                     << device_caps_.cooperative_matrix_k << std::endl;
-            break;
-        }
-    }
-    
-    // Set subgroup size from query
-    device_caps_.subgroup_size = subgroup_props.subgroupSize;
-    
-    std::cout << "[ShaderRuntime] Auto-tune complete:" << std::endl;
-    std::cout << "  Optimal workgroup: " << device_caps_.optimal_workgroup_size << std::endl;
-    std::cout << "  Wave size: " << device_caps_.wave_size << std::endl;
-    std::cout << "  Subgroup: " << device_caps_.subgroup_size << std::endl;
-    std::cout << "  Cooperative matrix: " << (device_caps_.supports_cooperative_matrix ? "yes" : "no") << std::endl;
-}
-
-ShaderRuntime::ShaderSpecialization ShaderRuntime::get_optimal_specialization(uint32_t operation_type) const {
-    ShaderSpecialization spec;
-    
-    switch (operation_type) {
-        case 0: // Matmul
-            spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
-            spec.workgroup_size_y = 1;
-            spec.use_subgroup_ops = device_caps_.prefers_warp_shuffle;
-            spec.subgroup_size = device_caps_.subgroup_size;
-            spec.use_fp16_math = device_caps_.supports_fp16;
-            break;
-            
-        case 1: // Attention
-            spec.workgroup_size_x = 16;
-            spec.workgroup_size_y = 16;
-            spec.use_subgroup_ops = true;
-            spec.subgroup_size = device_caps_.subgroup_size;
-            spec.use_fp16_math = device_caps_.supports_fp16;
-            break;
-            
-        case 2: // RMS Norm
-            spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
-            spec.workgroup_size_y = 1;
-            spec.use_subgroup_ops = true;
-            spec.subgroup_size = device_caps_.subgroup_size;
-            spec.use_fp16_math = false;  // Keep precision for norms
-            break;
-            
-        default:
-            spec.workgroup_size_x = 128;
-            spec.workgroup_size_y = 1;
-            spec.use_subgroup_ops = false;
-            spec.use_fp16_math = false;
-            break;
-    }
-    
-    return spec;
-}
-
-VkPipeline ShaderRuntime::get_cooperative_matmul_pipeline(const ShaderSpecialization& spec) {
-    if (!device_caps_.supports_cooperative_matrix) {
-        return VK_NULL_HANDLE;
-    }
-    
-    // Generate cooperative matrix shader
-    std::string shader_source = generate_tuned_matmul_shader(
-        device_caps_.cooperative_matrix_m,
-        device_caps_.cooperative_matrix_n,
-        device_caps_.cooperative_matrix_k
-    );
-    
-    auto shader_result = compile_glsl_to_spirv(shader_source, {});
-    if (!shader_result.has_value()) {
-        return VK_NULL_HANDLE;
-    }
-    
-    std::vector<uint32_t> spec_data;
-    VkSpecializationInfo spec_info = create_specialization_info(spec, spec_data);
-    
-    VkComputePipelineCreateInfo pipeline_info = create_compute_pipeline_info(
-        shader_result.value(), pipeline_layout_, &spec_info);
-    
-    VkPipeline pipeline;
-    VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, 
-                                             &pipeline_info, nullptr, &pipeline);
-    
-    return (result == VK_SUCCESS) ? pipeline : VK_NULL_HANDLE;
-}
-
-std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
-    std::stringstream ss;
-    
-    ss << "#version 460\n";
-    ss << "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n";
-    
-    if (device_caps_.supports_cooperative_matrix) {
-        ss << "#extension GL_KHR_cooperative_matrix : require\n";
-    }
-    
-    if (device_caps_.prefers_warp_shuffle) {
-        ss << "#extension GL_KHR_shader_subgroup_shuffle : require\n";
-    }
-    
-    ss << "\nlayout(local_size_x = " << device_caps_.optimal_workgroup_size << ", local_size_y = 1) in;\n\n";
-    
-    ss << R"(
-layout(push_constant) uniform PushConstants {
-    uint M, N, K;
-} pc;
-
-layout(set = 0, binding = 0) readonly buffer A { float16_t a[]; };
-layout(set = 0, binding = 1) readonly buffer B { float16_t b[]; };
-layout(set = 0, binding = 2) buffer C { float16_t c[]; };
-
-shared float16_t tile_a[128][32];
-shared float16_t tile_b[32][128];
-
-void main() {
-    uint global_x = gl_GlobalInvocationID.x;
-    uint global_y = gl_GlobalInvocationID.y;
-    
-    float16_t acc = 0.0hf;
-    
-    // Tiled matrix multiplication with shared memory
-    for (uint tile_k = 0; tile_k < pc.K; tile_k += 32) {
-        // Load tiles cooperatively
-        if (global_y < pc.M && tile_k + gl_LocalInvocationID.x < pc.K) {
-            tile_a[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = 
-                a[global_y * pc.K + tile_k + gl_LocalInvocationID.x];
-        }
-        
-        if (global_x < pc.N && tile_k + gl_LocalInvocationID.y < pc.K) {
-            tile_b[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = 
-                b[(tile_k + gl_LocalInvocationID.y) * pc.N + global_x];
-        }
-        
-        barrier();
-        
-        // Compute partial dot product
-        for (uint k = 0; k < 32 && tile_k + k < pc.K; ++k) {
-            acc += tile_a[gl_LocalInvocationID.y][k] * tile_b[k][gl_LocalInvocationID.x];
-        }
-        
-        barrier();
-    }
-    
-    if (global_y < pc.M && global_x < pc.N) {
-        c[global_y * pc.N + global_x] = acc;
-    }
-}
-)";
-    
-    return ss.str();
-}
-
-std::string ShaderRuntime::generate_tuned_attention_shader(uint32_t seq_len, uint32_t head_dim) {
-    std::stringstream ss;
-    
-    ss << "#version 460\n";
-    ss << "#extension GL_KHR_shader_subgroup : require\n";
-    
-    if (device_caps_.supports_fp16) {
-        ss << "#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n";
-    }
-    
-    ss << "\nlayout(local_size_x = " << device_caps_.subgroup_size << ", local_size_y = 1) in;\n\n";
-    
-    ss << R"(
-layout(push_constant) uniform PushConstants {
-    uint seq_len, head_dim, num_heads;
-    float scale;
-} pc;
-
-layout(set = 0, binding = 0) readonly buffer Q { float q[]; };
-layout(set = 0, binding = 1) readonly buffer K { float k[]; };
-layout(set = 0, binding = 2) readonly buffer V { float v[]; };
-layout(set = 0, binding = 3) buffer O { float o[]; };
-
-void main() {
-    uint head = gl_WorkGroupID.x;
-    uint token = gl_GlobalInvocationID.x;
-    
-    if (head >= pc.num_heads || token >= pc.seq_len) return;
-    
-    // Compute attention scores with subgroup optimization
-    float max_score = -1e30;
-    float sum_exp = 0.0;
-    float acc = 0.0;
-    
-    for (uint i = gl_SubgroupInvocationID; i < pc.seq_len; i += gl_SubgroupSize) {
-        float score = 0.0;
-        for (uint d = 0; d < pc.head_dim; ++d) {
-            score += q[token * pc.head_dim * pc.num_heads + head * pc.head_dim + d] *
-                     k[i * pc.head_dim * pc.num_heads + head * pc.head_dim + d];
-        }
-        score *= pc.scale;
-        
-        // Subgroup-level softmax
-        float max_subgroup = subgroupMax(score);
-        max_score = max(max_score, max_subgroup);
-        
-        float exp_score = exp(score - max_score);
-        sum_exp += subgroupAdd(exp_score);
-        
-        // Accumulate weighted values
-        for (uint d = 0; d < pc.head_dim; ++d) {
-            acc += exp_score * v[i * pc.head_dim * pc.num_heads + head * pc.head_dim + d];
-        }
-    }
-    
-    // Write output
-    if (gl_SubgroupInvocationID == 0) {
-        for (uint d = 0; d < pc.head_dim; ++d) {
-            o[token * pc.head_dim * pc.num_heads + head * pc.head_dim + d] = acc / sum_exp;
-        }
-    }
-}
-)";
-    
-    return ss.str();
-}
-
+} // namespace vk_symbiote

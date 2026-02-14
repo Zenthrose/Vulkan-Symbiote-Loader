@@ -118,9 +118,6 @@ private:
     struct MigrationState;
     std::unique_ptr<MigrationState> migration_state_;
     
-    bool perform_migration(MemoryTier target_tier);
-    bool migrate_to_vram_timeline();
-    
     Expected<std::vector<float>> decompress_zfp();
     Expected<std::vector<float>> decompress_blosc();
     Expected<std::vector<float>> decompress_raw();
@@ -131,6 +128,8 @@ private:
     bool migrate_to_vram_timeline();  // Async with timeline semaphores
     bool migrate_to_vram_sync();       // Synchronous fallback
 };
+
+class DefragManager;
 
 class PackManager {
 public:
@@ -149,11 +148,19 @@ public:
     float eviction_aggression() const noexcept { return eviction_aggression_; }
     std::vector<uint64> get_loaded_pack_ids() const;
     size_t total_packs() const noexcept { return packs_.size(); }
+    
+    // Trigger background defragmentation
+    void trigger_defrag();
+    
+    // Get timeline semaphore support status
+    bool timeline_semaphores_supported() const;
+    
 private:
     VkDevice device_; VkPhysicalDevice physical_device_; VmaAllocator vma_;
     std::unordered_map<uint64, std::shared_ptr<NomadPack> > packs_;
     std::unique_ptr<FractalMemoryAllocator> vram_allocator_;
     std::unique_ptr<FractalMemoryAllocator> ram_allocator_;
+    std::unique_ptr<DefragManager> defrag_mgr_;
     mutable std::mutex mutex_; float eviction_aggression_ = 0.7f;
     uint64 vram_budget_ = 0, ram_budget_ = 0;
     std::thread prefetch_thread_; std::atomic<bool> prefetch_running_{false};

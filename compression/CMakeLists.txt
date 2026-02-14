@@ -4,14 +4,65 @@ project(CompressionBackends LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Option to enable ZFP compression
-option(ENABLE_ZFP "Enable ZFP compression support" ON)
-option(ENABLE_BLOSC2 "Enable Blosc2 compression support" ON)
+# Find and link Blosc2
+set(BLOSC2_ENABLED FALSE)
+find_package(Blosc2 QUIET)
+if(Blosc2_FOUND)
+    set(BLOSC2_ENABLED TRUE)
+    message(STATUS "✅ Blosc2 compression enabled")
+else()
+    # Try to find blosc2 via pkg-config
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(BLOSC2 blosc2)
+        if(BLOSC2_FOUND)
+            set(BLOSC2_ENABLED TRUE)
+            message(STATUS "✅ Blosc2 compression enabled (via pkg-config)")
+        endif()
+    endif()
+endif()
 
-# Source files for compression backends
-set(COMPRESSION_SOURCES
-    src/Blosc2Compression.cpp
-)
+# Find and link ZFP
+set(ZFP_ENABLED FALSE)
+find_package(ZFP QUIET)
+if(ZFP_FOUND)
+    set(ZFP_ENABLED TRUE)
+    message(STATUS "✅ ZFP compression enabled")
+else()
+    # Try to find ZFP in standard locations
+    find_path(ZFP_INCLUDE_DIR zfp.h PATHS /usr/include /usr/local/include PATH_SUFFIXES zfp)
+    find_library(ZFP_LIBRARY zfp PATHS /usr/lib /usr/local/lib)
+    
+    if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
+        set(ZFP_ENABLED TRUE)
+        message(STATUS "✅ ZFP compression enabled (found at ${ZFP_LIBRARY})")
+    else()
+        message(STATUS "⚠️  ZFP not found - lossy compression disabled")
+    endif()
+endif()
+
+# Source files - only include implementation files when libraries are found
+set(COMPRESSION_SOURCES)
+
+if(BLOSC2_ENABLED)
+    list(APPEND COMPRESSION_SOURCES src/Blosc2Compression.cpp)
+endif()
+
+if(ZFP_ENABLED)
+    list(APPEND COMPRESSION_SOURCES src/ZFPCompression.cpp)
+endif()
+
+if(BLOSC2_ENABLED AND ZFP_ENABLED)
+    list(APPEND COMPRESSION_SOURCES src/HybridCompression.cpp)
+endif()
+
+# Need at least one source file for the library
+if(NOT COMPRESSION_SOURCES)
+    # Create a minimal source file when no backends are enabled
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/noop.cpp" 
+        "// No compression backends enabled - headers provide fallback stubs\n")
+    list(APPEND COMPRESSION_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/noop.cpp")
+endif()
 
 set(COMPRESSION_HEADERS
     include/CompressionBackend.h
@@ -20,14 +71,6 @@ set(COMPRESSION_HEADERS
     include/HybridCompression.h
 )
 
-if(ENABLE_ZFP)
-    list(APPEND COMPRESSION_SOURCES src/ZFPCompression.cpp)
-endif()
-
-if(ENABLE_ZFP AND ENABLE_BLOSC2)
-    list(APPEND COMPRESSION_SOURCES src/HybridCompression.cpp)
-endif()
-
 add_library(compression_backends STATIC ${COMPRESSION_SOURCES} ${COMPRESSION_HEADERS})
 
 target_include_directories(compression_backends PUBLIC 
@@ -35,53 +78,23 @@ target_include_directories(compression_backends PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# Find and link Blosc2
-if(ENABLE_BLOSC2)
-    find_package(Blosc2 QUIET)
-    if(Blosc2_FOUND)
-        target_compile_definitions(compression_backends PRIVATE BLOSC2_ENABLED)
+if(BLOSC2_ENABLED)
+    target_compile_definitions(compression_backends PRIVATE BLOSC2_ENABLED)
+    if(TARGET Blosc2::Blosc2)
         target_link_libraries(compression_backends PUBLIC Blosc2::Blosc2)
-        message(STATUS "✅ Blosc2 compression enabled")
     else()
-        # Try to find blosc2 via pkg-config
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(BLOSC2 blosc2)
-            if(BLOSC2_FOUND)
-                target_compile_definitions(compression_backends PRIVATE BLOSC2_ENABLED)
-                target_include_directories(compression_backends PRIVATE ${BLOSC2_INCLUDE_DIRS})
-                target_link_libraries(compression_backends PUBLIC ${BLOSC2_LIBRARIES})
-                message(STATUS "✅ Blosc2 compression enabled (via pkg-config)")
-            endif()
-        endif()
+        target_include_directories(compression_backends PRIVATE ${BLOSC2_INCLUDE_DIRS})
+        target_link_libraries(compression_backends PUBLIC ${BLOSC2_LIBRARIES})
     endif()
 endif()
 
-# Find and link ZFP
-if(ENABLE_ZFP)
-    find_package(ZFP QUIET)
-    if(ZFP_FOUND)
-        target_compile_definitions(compression_backends PRIVATE ZFP_ENABLED)
+if(ZFP_ENABLED)
+    target_compile_definitions(compression_backends PRIVATE ZFP_ENABLED)
+    if(TARGET zfp::zfp)
         target_link_libraries(compression_backends PUBLIC zfp::zfp)
-        message(STATUS "✅ ZFP compression enabled")
     else()
-        # Try to find ZFP in standard locations
-        find_path(ZFP_INCLUDE_DIR zfp.h
-            PATHS /usr/include /usr/local/include
-            PATH_SUFFIXES zfp
-        )
-        find_library(ZFP_LIBRARY zfp
-            PATHS /usr/lib /usr/local/lib
-        )
-        
-        if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
-            target_compile_definitions(compression_backends PRIVATE ZFP_ENABLED)
-            target_include_directories(compression_backends PRIVATE ${ZFP_INCLUDE_DIR})
-            target_link_libraries(compression_backends PUBLIC ${ZFP_LIBRARY})
-            message(STATUS "✅ ZFP compression enabled (found at ${ZFP_LIBRARY})")
-        else()
-            message(STATUS "⚠️  ZFP not found - lossy compression disabled")
-        endif()
+        target_include_directories(compression_backends PRIVATE ${ZFP_INCLUDE_DIR})
+        target_link_libraries(compression_backends PUBLIC ${ZFP_LIBRARY})
     endif()
 endif()
 
@@ -105,7 +118,11 @@ install(DIRECTORY include/
 
 # Print configuration summary
 message(STATUS "=== Compression Backends Configuration ===")
-message(STATUS "Blosc2: ${ENABLE_BLOSC2}")
-message(STATUS "ZFP: ${ENABLE_ZFP}")
-message(STATUS "Hybrid: ${ENABLE_ZFP_AND_ENABLE_BLOSC2}")
+message(STATUS "Blosc2: ${BLOSC2_ENABLED}")
+message(STATUS "ZFP: ${ZFP_ENABLED}")
+if(BLOSC2_ENABLED AND ZFP_ENABLED)
+    message(STATUS "Hybrid: ON")
+else()
+    message(STATUS "Hybrid: OFF (requires both)")
+endif()
 message(STATUS "===========================================")

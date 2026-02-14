@@ -7,9 +7,11 @@ set(CMAKE_DEPENDS_GENERATOR "Unix Makefiles")
 # The top level Makefile was generated from the following files:
 set(CMAKE_MAKEFILE_DEPENDS
   "CMakeCache.txt"
+  "/media/michael/external/Vulkan-Symbiote-Loader/CMakeLists.txt"
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeSystem.cmake"
-  "/media/michael/external/Vulkan-Symbiote-loader/vk_symbiote/CMakeLists.txt"
+  "/media/michael/external/Vulkan-Symbiote-Loader/compression/CMakeLists.txt"
+  "/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/CMakeLists.txt"
   "/usr/share/cmake-3.28/Modules/CMakeCXXCompiler.cmake.in"
   "/usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp"
   "/usr/share/cmake-3.28/Modules/CMakeCXXInformation.cmake"
@@ -79,6 +81,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/Compiler/zOS-CXX-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageMessage.cmake"
+  "/usr/share/cmake-3.28/Modules/FindPkgConfig.cmake"
   "/usr/share/cmake-3.28/Modules/FindVulkan.cmake"
   "/usr/share/cmake-3.28/Modules/Internal/FeatureTesting.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Determine-CXX.cmake"
@@ -101,11 +104,14 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
+  "compression/CMakeFiles/CMakeDirectoryInformation.cmake"
+  "vk_symbiote/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/vk_symbiote.dir/DependInfo.cmake"
-  "CMakeFiles/vk_symbiote_example.dir/DependInfo.cmake"
-  "CMakeFiles/vk_symbiote_benchmark.dir/DependInfo.cmake"
+  "compression/CMakeFiles/compression_backends.dir/DependInfo.cmake"
+  "vk_symbiote/CMakeFiles/vk_symbiote.dir/DependInfo.cmake"
+  "vk_symbiote/CMakeFiles/vk_symbiote_example.dir/DependInfo.cmake"
+  "vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/DependInfo.cmake"
   )

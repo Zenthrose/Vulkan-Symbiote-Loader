@@ -5,11 +5,34 @@
 #include "VitalityOracle.h"
 #include "GGUFLoader.h"
 #include <vulkan/vulkan.h>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <memory>
 
 namespace vk_symbiote {
 
 class ShaderRuntime;
 class Tokenizer;
+
+// Benchmark result structure
+struct BenchmarkResult {
+    uint32_t warmup_tokens = 0;
+    uint32_t benchmark_tokens = 0;
+    uint32_t iterations = 0;
+    
+    double avg_tokens_per_sec = 0.0;
+    double min_tokens_per_sec = 0.0;
+    double max_tokens_per_sec = 0.0;
+    double std_dev_tokens_per_sec = 0.0;
+    double avg_latency_ms = 0.0;
+    double peak_vram_gb = 0.0;
+    double cache_hit_rate = 0.0;
+    double cache_size_mb = 0.0;
+    
+    std::unordered_map<std::string, double> power_mode_results;
+    double memory_pressure_result = 0.0;
+};
 
 class VulkanSymbioteEngine {
 public:
@@ -26,6 +49,19 @@ public:
     VkDevice device() const noexcept { return device_; }
     VkPhysicalDevice physical_device() const noexcept { return physical_device_; }
     VkQueue compute_queue() const noexcept { return compute_queue_; }
+    
+    // Benchmark mode
+    BenchmarkResult run_benchmark(uint32_t warmup_tokens = 10, uint32_t benchmark_tokens = 100, 
+                                   uint32_t iterations = 3);
+    
+    // Batched text generation
+    std::vector<std::string> generate_text_batch(const std::vector<std::string>& prompts, 
+                                                  uint32_t max_tokens_per_prompt = 256,
+                                                  float temperature = 0.7f);
+    
+    // Memory statistics
+    MemoryPoolStats get_vram_stats();
+    double get_peak_vram_usage();
 
 private:
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -109,6 +145,14 @@ private:
     void check_battery_status();
     float read_battery_capacity();
     bool read_ac_connected();
+    
+    // Benchmark helpers
+    std::unordered_map<std::string, double> test_power_modes(uint32_t tokens);
+    double test_memory_pressure(uint32_t tokens);
+    void save_benchmark_results_json(const BenchmarkResult& result, const std::string& filename);
+    double calculate_mean(const std::vector<double>& samples);
+    double calculate_std_dev(const std::vector<double>& samples);
+    uint32_t sample_token(const std::vector<float>& logits, float temperature);
 };
 
 } // namespace vk_symbiote

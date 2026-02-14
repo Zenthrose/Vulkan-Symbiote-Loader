@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcompression_backends.a CMakeFiles/compression_backends.dir/noop.cpp.o
+/usr/bin/ranlib libcompression_backends.a

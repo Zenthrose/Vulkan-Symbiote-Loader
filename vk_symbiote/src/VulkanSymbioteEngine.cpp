@@ -1,10 +1,12 @@
 #include "VulkanSymbioteEngine.h"
+#include "ConfigManager.h"
 #include "ShaderRuntime.h"
 #include "Tokenizer.h"
 #include "Utils.h"
 #include "Common.h"
 #include <iostream>
 #include <stdexcept>
+#include <fstream>
 
 namespace vk_symbiote {
 
@@ -1090,5 +1092,342 @@ void VulkanSymbioteEngine::get_workgroup_size(uint32_t& x, uint32_t& y, uint32_t
     x = workgroup_size_x_;
     y = workgroup_size_y_;
     z = workgroup_size_z_;
+}
+
+// ============================================================================
+// Benchmark Mode Implementation
+// ============================================================================
+
+BenchmarkResult VulkanSymbioteEngine::run_benchmark(uint32_t warmup_tokens, uint32_t benchmark_tokens, 
+                                                     uint32_t iterations) {
+    BenchmarkResult result;
+    result.warmup_tokens = warmup_tokens;
+    result.benchmark_tokens = benchmark_tokens;
+    result.iterations = iterations;
+    
+    std::cout << "[Benchmark] Starting benchmark..." << std::endl;
+    std::cout << "  Warmup: " << warmup_tokens << " tokens" << std::endl;
+    std::cout << "  Benchmark: " << benchmark_tokens << " tokens" << std::endl;
+    std::cout << "  Iterations: " << iterations << std::endl;
+    
+    // Reset metrics
+    reset_performance_metrics();
+    
+    // Store original config
+    auto original_profile = get_power_profile();
+    auto original_lookahead = get_prefetch_lookahead();
+    
+    // Warmup phase
+    std::cout << "[Benchmark] Warmup phase..." << std::endl;
+    std::string warmup_prompt = "The quick brown fox jumps over the lazy dog. ";
+    for (uint32_t i = 0; i < warmup_tokens / 10; ++i) {
+        generate(warmup_prompt, 10, 0.7f);
+    }
+    
+    // Capture baseline stats
+    auto baseline_vram = get_vram_stats();
+    double baseline_vram_gb = static_cast<double>(baseline_vram.used_size) / (1024.0 * 1024.0 * 1024.0);
+    
+    // Benchmark iterations
+    std::cout << "[Benchmark] Running " << iterations << " iterations..." << std::endl;
+    std::vector<double> tokens_per_sec_samples;
+    std::vector<double> latency_samples;
+    
+    std::string bench_prompt = "Once upon a time, in a land far away, there was a brave knight who";
+    
+    for (uint32_t iter = 0; iter < iterations; ++iter) {
+        std::cout << "[Benchmark] Iteration " << (iter + 1) << "/" << iterations << std::endl;
+        
+        // Clear cache before each iteration for consistent measurements
+        if (gguf_loader_) {
+            gguf_loader_->clear_tensor_cache();
+        }
+        
+        uint64_t start_ns = get_current_time_ns();
+        auto output = generate(bench_prompt, benchmark_tokens, 0.7f);
+        uint64_t end_ns = get_current_time_ns();
+        
+        double elapsed_sec = static_cast<double>(end_ns - start_ns) / 1e9;
+        double tps = static_cast<double>(benchmark_tokens) / elapsed_sec;
+        
+        tokens_per_sec_samples.push_back(tps);
+        latency_samples.push_back(elapsed_sec);
+        
+        std::cout << "  Tokens/sec: " << tps << std::endl;
+        std::cout << "  Latency: " << elapsed_sec << "s" << std::endl;
+    }
+    
+    // Calculate statistics
+    result.avg_tokens_per_sec = calculate_mean(tokens_per_sec_samples);
+    result.min_tokens_per_sec = *std::min_element(tokens_per_sec_samples.begin(), tokens_per_sec_samples.end());
+    result.max_tokens_per_sec = *std::max_element(tokens_per_sec_samples.begin(), tokens_per_sec_samples.end());
+    result.std_dev_tokens_per_sec = calculate_std_dev(tokens_per_sec_samples);
+    
+    result.avg_latency_ms = calculate_mean(latency_samples) * 1000.0;
+    result.peak_vram_gb = get_peak_vram_usage();
+    
+    // Cache statistics
+    if (gguf_loader_) {
+        result.cache_hit_rate = gguf_loader_->get_tensor_cache_hit_rate();
+        result.cache_size_mb = static_cast<double>(gguf_loader_->get_tensor_cache_memory()) / (1024.0 * 1024.0);
+    }
+    
+    // Power profile test if enabled
+    auto& config = ConfigManager::instance();
+    if (config.benchmark().test_power_modes) {
+        result.power_mode_results = test_power_modes(benchmark_tokens);
+    }
+    
+    // Memory pressure test if enabled
+    if (config.benchmark().test_memory_pressure) {
+        result.memory_pressure_result = test_memory_pressure(benchmark_tokens);
+    }
+    
+    // Restore original settings
+    set_power_profile(original_profile);
+    set_prefetch_lookahead(original_lookahead);
+    
+    // Print summary
+    std::cout << "[Benchmark] Results:" << std::endl;
+    std::cout << "  Average: " << result.avg_tokens_per_sec << " t/s" << std::endl;
+    std::cout << "  Min/Max: " << result.min_tokens_per_sec << " / " << result.max_tokens_per_sec << " t/s" << std::endl;
+    std::cout << "  Std Dev: " << result.std_dev_tokens_per_sec << " t/s" << std::endl;
+    std::cout << "  Latency: " << result.avg_latency_ms << " ms/token" << std::endl;
+    std::cout << "  Peak VRAM: " << result.peak_vram_gb << " GB" << std::endl;
+    std::cout << "  Cache Hit Rate: " << (result.cache_hit_rate * 100.0) << "%" << std::endl;
+    
+    // Save results if JSON output enabled
+    if (config.benchmark().output_json) {
+        save_benchmark_results_json(result, config.benchmark().output_file);
+    }
+    
+    return result;
+}
+
+std::unordered_map<std::string, double> VulkanSymbioteEngine::test_power_modes(uint32_t tokens) {
+    std::unordered_map<std::string, double> results;
+    std::string prompt = "Testing different power modes for performance comparison.";
+    
+    std::cout << "[Benchmark] Testing power modes..." << std::endl;
+    
+    // Test HIGH_PERFORMANCE
+    set_power_profile(PowerProfile::HIGH_PERFORMANCE);
+    auto start = get_current_time_ns();
+    generate(prompt, tokens, 0.7f);
+    auto end = get_current_time_ns();
+    results["high_performance"] = static_cast<double>(tokens) / (static_cast<double>(end - start) / 1e9);
+    std::cout << "  High Performance: " << results["high_performance"] << " t/s" << std::endl;
+    
+    // Test BALANCED
+    set_power_profile(PowerProfile::BALANCED);
+    start = get_current_time_ns();
+    generate(prompt, tokens, 0.7f);
+    end = get_current_time_ns();
+    results["balanced"] = static_cast<double>(tokens) / (static_cast<double>(end - start) / 1e9);
+    std::cout << "  Balanced: " << results["balanced"] << " t/s" << std::endl;
+    
+    // Test POWER_SAVER
+    set_power_profile(PowerProfile::POWER_SAVER);
+    start = get_current_time_ns();
+    generate(prompt, tokens, 0.7f);
+    end = get_current_time_ns();
+    results["power_saver"] = static_cast<double>(tokens) / (static_cast<double>(end - start) / 1e9);
+    std::cout << "  Power Saver: " << results["power_saver"] << " t/s" << std::endl;
+    
+    return results;
+}
+
+double VulkanSymbioteEngine::test_memory_pressure(uint32_t tokens) {
+    std::cout << "[Benchmark] Testing memory pressure handling..." << std::endl;
+    
+    // Force aggressive memory pressure by limiting available memory
+    if (pack_manager_) {
+        auto original_aggression = pack_manager_->eviction_aggression();
+        pack_manager_->set_aggression(0.9f);  // Very aggressive eviction
+        
+        std::string prompt = "Memory pressure test with aggressive eviction policy.";
+        auto start = get_current_time_ns();
+        generate(prompt, tokens, 0.7f);
+        auto end = get_current_time_ns();
+        
+        pack_manager_->set_aggression(original_aggression);
+        
+        double tps = static_cast<double>(tokens) / (static_cast<double>(end - start) / 1e9);
+        std::cout << "  Under pressure: " << tps << " t/s" << std::endl;
+        return tps;
+    }
+    
+    return 0.0;
+}
+
+void VulkanSymbioteEngine::save_benchmark_results_json(const BenchmarkResult& result, const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[Benchmark] Failed to open output file: " << filename << std::endl;
+        return;
+    }
+    
+    file << "{\n";
+    file << "  \"benchmark_version\": \"1.0\",\n";
+    file << "  \"timestamp\": " << get_current_time_ns() << ",\n";
+    file << "  \"configuration\": {\n";
+    file << "    \"warmup_tokens\": " << result.warmup_tokens << ",\n";
+    file << "    \"benchmark_tokens\": " << result.benchmark_tokens << ",\n";
+    file << "    \"iterations\": " << result.iterations << "\n";
+    file << "  },\n";
+    file << "  \"results\": {\n";
+    file << "    \"avg_tokens_per_sec\": " << result.avg_tokens_per_sec << ",\n";
+    file << "    \"min_tokens_per_sec\": " << result.min_tokens_per_sec << ",\n";
+    file << "    \"max_tokens_per_sec\": " << result.max_tokens_per_sec << ",\n";
+    file << "    \"std_dev_tokens_per_sec\": " << result.std_dev_tokens_per_sec << ",\n";
+    file << "    \"avg_latency_ms\": " << result.avg_latency_ms << ",\n";
+    file << "    \"peak_vram_gb\": " << result.peak_vram_gb << ",\n";
+    file << "    \"cache_hit_rate\": " << result.cache_hit_rate << ",\n";
+    file << "    \"cache_size_mb\": " << result.cache_size_mb << "\n";
+    file << "  }";
+    
+    if (!result.power_mode_results.empty()) {
+        file << ",\n  \"power_modes\": {\n";
+        bool first = true;
+        for (const auto& [mode, tps] : result.power_mode_results) {
+            if (!first) file << ",\n";
+            file << "    \"" << mode << "\": " << tps;
+            first = false;
+        }
+        file << "\n  }";
+    }
+    
+    file << "\n}\n";
+    file.close();
+    
+    std::cout << "[Benchmark] Results saved to: " << filename << std::endl;
+}
+
+double VulkanSymbioteEngine::calculate_mean(const std::vector<double>& samples) {
+    if (samples.empty()) return 0.0;
+    double sum = std::accumulate(samples.begin(), samples.end(), 0.0);
+    return sum / samples.size();
+}
+
+double VulkanSymbioteEngine::calculate_std_dev(const std::vector<double>& samples) {
+    if (samples.size() < 2) return 0.0;
+    double mean = calculate_mean(samples);
+    double sq_sum = std::accumulate(samples.begin(), samples.end(), 0.0,
+        [mean](double acc, double val) { return acc + (val - mean) * (val - mean); });
+    return std::sqrt(sq_sum / (samples.size() - 1));
+}
+
+double VulkanSymbioteEngine::get_peak_vram_usage() {
+    if (!pack_manager_) return 0.0;
+    auto stats = pack_manager_->get_vram_stats();
+    return static_cast<double>(stats.used_size) / (1024.0 * 1024.0 * 1024.0);
+}
+
+MemoryPoolStats VulkanSymbioteEngine::get_vram_stats() {
+    if (!pack_manager_) return MemoryPoolStats();
+    return pack_manager_->get_vram_stats();
+}
+
+// ============================================================================
+// Batched Text Generation
+// ============================================================================
+
+std::vector<std::string> VulkanSymbioteEngine::generate_text_batch(
+    const std::vector<std::string>& prompts, 
+    uint32_t max_tokens_per_prompt,
+    float temperature) {
+    
+    std::vector<std::string> results;
+    results.reserve(prompts.size());
+    
+    if (prompts.empty()) return results;
+    
+    std::cout << "[Batch] Processing " << prompts.size() << " prompts..." << std::endl;
+    
+    // Encode all prompts first to batch the embedding computation
+    std::vector<std::vector<uint32_t>> token_batches;
+    token_batches.reserve(prompts.size());
+    
+    uint32_t max_seq_len = 0;
+    for (const auto& prompt : prompts) {
+        auto tokens = encode(prompt);
+        max_seq_len = std::max(max_seq_len, static_cast<uint32_t>(tokens.size()));
+        token_batches.push_back(std::move(tokens));
+    }
+    
+    // Process each prompt in the batch
+    // Note: This is a simplified implementation. A full implementation would
+    // batch the GPU operations across all prompts for better efficiency.
+    
+    for (size_t i = 0; i < prompts.size(); ++i) {
+        std::cout << "[Batch] Prompt " << (i + 1) << "/" << prompts.size() << std::endl;
+        
+        // Set the current token sequence
+        token_sequence_ = token_batches[i];
+        current_position_ = 0;
+        
+        // Generate continuation
+        std::string result = prompts[i];
+        
+        for (uint32_t token_idx = 0; token_idx < max_tokens_per_prompt; ++token_idx) {
+            // Check battery status periodically
+            if (token_idx % 5 == 0) {
+                check_battery_status();
+            }
+            
+            auto hidden = embed_tokens(token_sequence_);
+            if (!hidden.has_value()) break;
+            
+            hidden_states_ = hidden.value();
+            
+            // Forward through all layers
+            for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
+                schedule_prefetch(layer, prefetch_lookahead_);
+                
+                auto layer_out = forward_layer(hidden_states_, layer);
+                if (!layer_out.has_value()) break;
+                hidden_states_ = layer_out.value();
+            }
+            
+            // Get logits and sample
+            auto logits = final_projection(hidden_states_);
+            if (!logits.has_value()) break;
+            
+            uint32_t next_token = sample_token(logits.value(), temperature);
+            token_sequence_.push_back(next_token);
+            
+            auto token_text = decode({next_token});
+            result += token_text;
+            
+            current_position_++;
+            
+            if (next_token == 2 || next_token == 0) break;  // EOS tokens
+            
+            if (token_idx % 10 == 0) {
+                evict_low_priority();
+            }
+        }
+        
+        results.push_back(result);
+    }
+    
+    std::cout << "[Batch] Completed processing " << prompts.size() << " prompts" << std::endl;
+    return results;
+}
+
+uint32_t VulkanSymbioteEngine::sample_token(const std::vector<float>& logits, float temperature) {
+    if (temperature <= 0.0f) {
+        // Greedy sampling
+        return static_cast<uint32_t>(std::max_element(logits.begin(), logits.end()) - logits.begin());
+    }
+    
+    // Temperature sampling with top-k
+    std::vector<uint32_t> tokens;
+    std::vector<float> probs;
+    float* workspace = new float[logits.size()];
+    top_k_sampling(logits.data(), static_cast<uint32_t>(logits.size()), 40, temperature, tokens, probs, workspace);
+    delete[] workspace;
+    
+    return tokens.empty() ? 0 : tokens[0];
 }
 

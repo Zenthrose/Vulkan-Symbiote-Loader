@@ -26,7 +26,8 @@ std::unique_ptr<Tokenizer> Tokenizer::from_gguf(const std::filesystem::path& ggu
         return create_simple_tokenizer();
     }
     
-    uint32_t version, tensor_count, metadata_count;
+    uint32_t version;
+    uint64_t tensor_count, metadata_count;
     file.read(reinterpret_cast<char*>(&version), 4);
     file.read(reinterpret_cast<char*>(&tensor_count), 8);
     file.read(reinterpret_cast<char*>(&metadata_count), 8);

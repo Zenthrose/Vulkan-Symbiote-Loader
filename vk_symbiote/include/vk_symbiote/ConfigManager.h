@@ -66,6 +66,16 @@ struct LoggingConfig {
     uint32 max_log_file_size_mb = 100;
 };
 
+struct CodecConfig {
+    bool enable_compression = true;
+    std::string algorithm = "hybrid";  // blosc2, zfp, hybrid
+    uint32 compression_level = 5;
+    uint32 decompression_threads = 4;
+    bool enable_blosc2 = true;
+    bool enable_zfp = true;
+    float hybrid_compression_ratio = 0.5f;
+};
+
 class ConfigManager {
 public:
     static ConfigManager& instance();
@@ -95,6 +105,10 @@ public:
     const BenchmarkConfig& benchmark() const { return benchmark_config_; }
     void set_benchmark(const BenchmarkConfig& config) { benchmark_config_ = config; }
     
+    // Codec configuration
+    const CodecConfig& codec() const { return codec_config_; }
+    void set_codec(const CodecConfig& config) { codec_config_ = config; }
+    
     // Model configuration
     const std::string& model_path() const { return model_path_; }
     void set_model_path(const std::string& path) { model_path_ = path; }
@@ -115,17 +129,30 @@ private:
     LoggingConfig logging_config_;
     PowerConfig power_config_;
     BenchmarkConfig benchmark_config_;
+    CodecConfig codec_config_;
     std::string model_path_;
     
     static std::unique_ptr<ConfigManager> instance_;
     static std::mutex instance_mutex_;
     
-    // Helper methods
+    // Helper methods for legacy format
     void parse_memory_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_performance_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_logging_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_power_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_benchmark_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
+    
+    // Forward declaration for TOML parser
+    struct TOMLParser;
+    
+    // Helper methods for TOML parsing
+    void parse_memory_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_performance_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_logging_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_power_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_benchmark_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_codec_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_model_section_toml(const TOMLParser::TOMLDocument& doc);
 };
 
 } // namespace vk_symbiote
