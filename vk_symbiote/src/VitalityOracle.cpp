@@ -1,5 +1,6 @@
 #include "VitalityOracle.h"
 #include "ConfigManager.h"
+#include "Utils.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -9,34 +10,44 @@
 #include <sstream>
 #include <iomanip>
 #include <unordered_map>
+#include <queue>
+#include <random>
+#include <memory>
+#include <chrono>
+#include <deque>
+#include <array>
+#include <functional>
 
 namespace vk_symbiote {
 
 // ============================================================================
-// TOML Parser/Writer - Full Implementation
+// TOML Parser/Writer - Production-Ready Implementation
 // ============================================================================
 class TOMLParser {
 public:
     struct TOMLValue {
-        std::variant<std::string, int64_t, double, bool, std::vector<TOMLValue>> value;
+        std::variant<std::string, int64_t, double, bool, std::vector<TOMLValue>, std::unordered_map<std::string, TOMLValue>> value;
         
         bool is_string() const { return std::holds_alternative<std::string>(value); }
         bool is_int() const { return std::holds_alternative<int64_t>(value); }
         bool is_float() const { return std::holds_alternative<double>(value); }
         bool is_bool() const { return std::holds_alternative<bool>(value); }
         bool is_array() const { return std::holds_alternative<std::vector<TOMLValue>>(value); }
+        bool is_table() const { return std::holds_alternative<std::unordered_map<std::string, TOMLValue>>(value); }
         
         std::string& as_string() { return std::get<std::string>(value); }
         int64_t& as_int() { return std::get<int64_t>(value); }
         double& as_float() { return std::get<double>(value); }
         bool& as_bool() { return std::get<bool>(value); }
         std::vector<TOMLValue>& as_array() { return std::get<std::vector<TOMLValue>>(value); }
+        std::unordered_map<std::string, TOMLValue>& as_table() { return std::get<std::unordered_map<std::string, TOMLValue>>(value); }
         
         const std::string& as_string() const { return std::get<std::string>(value); }
         int64_t as_int() const { return std::get<int64_t>(value); }
         double as_float() const { return std::get<double>(value); }
         bool as_bool() const { return std::get<bool>(value); }
         const std::vector<TOMLValue>& as_array() const { return std::get<std::vector<TOMLValue>>(value); }
+        const std::unordered_map<std::string, TOMLValue>& as_table() const { return std::get<std::unordered_map<std::string, TOMLValue>>(value); }
     };
     
     using TOMLTable = std::unordered_map<std::string, TOMLValue>;
@@ -45,14 +56,38 @@ public:
     static TOMLDocument parse(const std::string& filename) {
         TOMLDocument doc;
         std::ifstream file(filename);
-        if (!file.is_open()) return doc;
+        if (!file.is_open()) {
+            std::cerr << "[TOMLParser] Failed to open file: " << filename << std::endl;
+            return doc;
+        }
         
         std::string line;
         std::string current_section;
         int line_num = 0;
+        bool in_multi_line_string = false;
+        std::string multi_line_buffer;
         
         while (std::getline(file, line)) {
             ++line_num;
+            
+            // Handle multi-line strings
+            if (in_multi_line_string) {
+                multi_line_buffer += "\n" + line;
+                if (line.find("\"\"\"") != std::string::npos) {
+                    in_multi_line_string = false;
+                    // Process complete multi-line string
+                    if (!current_section.empty()) {
+                        size_t eq_pos = multi_line_buffer.find('=');
+                        if (eq_pos != std::string::npos) {
+                            std::string key = trim(multi_line_buffer.substr(0, eq_pos));
+                            std::string value = extract_multi_line_string(multi_line_buffer.substr(eq_pos + 1));
+                            doc[current_section][key] = TOMLValue{value};
+                        }
+                    }
+                    multi_line_buffer.clear();
+                }
+                continue;
+            }
             
             // Trim whitespace
             line = trim(line);
@@ -60,21 +95,44 @@ public:
             // Skip empty lines and comments
             if (line.empty() || line[0] == '#') continue;
             
-            // Parse section header [section]
-            if (line[0] == '[' && line.back() == ']') {
-                current_section = line.substr(1, line.length() - 2);
+            // Parse section header [section] or [[section]] for arrays
+            if (line[0] == '[') {
+                if (line.size() >= 2 && line[1] == '[') {
+                    // Array of tables - simplified handling
+                    current_section = extract_section_name(line.substr(2, line.length() - 4));
+                } else {
+                    current_section = extract_section_name(line.substr(1, line.length() - 2));
+                }
                 if (doc.find(current_section) == doc.end()) {
                     doc[current_section] = TOMLTable();
                 }
                 continue;
             }
             
+            // Check for multi-line string start
+            if (line.find("\"\"\"") != std::string::npos) {
+                in_multi_line_string = true;
+                multi_line_buffer = line;
+                continue;
+            }
+            
             // Parse key-value pair
-            size_t eq_pos = line.find('=');
+            size_t eq_pos = find_equals(line);
             if (eq_pos == std::string::npos) continue;
             
             std::string key = trim(line.substr(0, eq_pos));
             std::string value_str = trim(line.substr(eq_pos + 1));
+            
+            // Handle inline tables
+            if (value_str[0] == '{' && value_str.back() == '}') {
+                value_str = value_str.substr(1, value_str.length() - 2);
+                TOMLValue table_val;
+                table_val.value = parse_inline_table(value_str);
+                if (!current_section.empty()) {
+                    doc[current_section][key] = table_val;
+                }
+                continue;
+            }
             
             if (current_section.empty()) continue;
             
@@ -86,18 +144,33 @@ public:
     
     static bool write(const std::string& filename, const TOMLDocument& doc) {
         std::ofstream file(filename);
-        if (!file.is_open()) return false;
+        if (!file.is_open()) {
+            std::cerr << "[TOMLParser] Failed to write file: " << filename << std::endl;
+            return false;
+        }
         
         file << "# VitalityOracle Model Configuration\n";
-        file << "# Auto-generated by Vulkan Symbiote Engine\n\n";
+        file << "# Auto-generated by Vulkan Symbiote Engine\n";
+        file << "# Timestamp: " << get_timestamp() << "\n\n";
         
         for (const auto& [section, table] : doc) {
             file << "[" << section << "]\n";
             
+            // Write non-table values first
             for (const auto& [key, value] : table) {
-                file << key << " = ";
-                write_value(file, value);
-                file << "\n";
+                if (!value.is_table()) {
+                    file << key << " = ";
+                    write_value(file, value);
+                    file << "\n";
+                }
+            }
+            
+            // Write nested tables
+            for (const auto& [key, value] : table) {
+                if (value.is_table()) {
+                    file << "\n[" << section << "." << key << "]\n";
+                    write_table(file, value.as_table());
+                }
             }
             
             file << "\n";
@@ -114,53 +187,209 @@ private:
         return str.substr(start, end - start + 1);
     }
     
+    static size_t find_equals(const std::string& str) {
+        bool in_string = false;
+        for (size_t i = 0; i < str.length(); ++i) {
+            if (str[i] == '"' && (i == 0 || str[i-1] != '\\')) {
+                in_string = !in_string;
+            } else if (str[i] == '=' && !in_string) {
+                return i;
+            }
+        }
+        return std::string::npos;
+    }
+    
+    static std::string extract_section_name(const std::string& str) {
+        std::string name = trim(str);
+        // Remove quotes if present
+        if (name.size() >= 2 && name.front() == '"' && name.back() == '"') {
+            name = name.substr(1, name.length() - 2);
+        }
+        return name;
+    }
+    
+    static std::string extract_multi_line_string(const std::string& str) {
+        size_t start = str.find("\"\"\"");
+        size_t end = str.rfind("\"\"\"");
+        if (start != std::string::npos && end != std::string::npos && start != end) {
+            return str.substr(start + 3, end - start - 3);
+        }
+        return str;
+    }
+    
+    static std::unordered_map<std::string, TOMLValue> parse_inline_table(const std::string& str) {
+        std::unordered_map<std::string, TOMLValue> result;
+        size_t pos = 0;
+        
+        while (pos < str.length()) {
+            size_t comma = find_comma_outside_braces(str, pos);
+            std::string pair = trim(str.substr(pos, comma - pos));
+            
+            size_t eq = pair.find('=');
+            if (eq != std::string::npos) {
+                std::string key = trim(pair.substr(0, eq));
+                std::string value = trim(pair.substr(eq + 1));
+                result[key] = parse_value(value);
+            }
+            
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+        
+        return result;
+    }
+    
+    static size_t find_comma_outside_braces(const std::string& str, size_t start) {
+        int brace_depth = 0;
+        bool in_string = false;
+        
+        for (size_t i = start; i < str.length(); ++i) {
+            if (str[i] == '"' && (i == 0 || str[i-1] != '\\')) {
+                in_string = !in_string;
+            } else if (!in_string) {
+                if (str[i] == '{' || str[i] == '[') brace_depth++;
+                else if (str[i] == '}' || str[i] == ']') brace_depth--;
+                else if (str[i] == ',' && brace_depth == 0) return i;
+            }
+        }
+        return std::string::npos;
+    }
+    
     static TOMLValue parse_value(const std::string& str) {
         TOMLValue result;
+        std::string trimmed = trim(str);
         
         // Try boolean
-        if (str == "true") {
+        if (trimmed == "true") {
             result.value = true;
             return result;
         }
-        if (str == "false") {
+        if (trimmed == "false") {
             result.value = false;
             return result;
         }
         
         // Try array
-        if (str[0] == '[' && str.back() == ']') {
-            result.value = parse_array(str);
+        if (trimmed[0] == '[' && trimmed.back() == ']') {
+            result.value = parse_array(trimmed);
             return result;
         }
         
-        // Try string
-        if (str[0] == '"' && str.back() == '"') {
-            result.value = str.substr(1, str.length() - 2);
+        // Try string (basic)
+        if (trimmed[0] == '"' && trimmed.back() == '"') {
+            result.value = parse_string(trimmed);
             return result;
+        }
+        
+        // Try literal string
+        if (trimmed[0] == '\'' && trimmed.back() == '\'') {
+            result.value = trimmed.substr(1, trimmed.length() - 2);
+            return result;
+        }
+        
+        // Try datetime
+        if (trimmed.find('T') != std::string::npos || trimmed.find(':') != std::string::npos) {
+            // Simplified datetime handling - treat as string
+            result.value = trimmed;
+            return result;
+        }
+        
+        // Try hex/octal/bin integers
+        if (trimmed.size() >= 3 && trimmed[0] == '0') {
+            if (trimmed[1] == 'x' || trimmed[1] == 'X') {
+                try {
+                    result.value = static_cast<int64_t>(std::stoll(trimmed.substr(2), nullptr, 16));
+                    return result;
+                } catch (...) {}
+            } else if (trimmed[1] == 'o' || trimmed[1] == 'O') {
+                try {
+                    result.value = static_cast<int64_t>(std::stoll(trimmed.substr(2), nullptr, 8));
+                    return result;
+                } catch (...) {}
+            } else if (trimmed[1] == 'b' || trimmed[1] == 'B') {
+                try {
+                    result.value = static_cast<int64_t>(std::stoll(trimmed.substr(2), nullptr, 2));
+                    return result;
+                } catch (...) {}
+            }
         }
         
         // Try integer
         try {
             size_t pos;
-            int64_t int_val = std::stoll(str, &pos);
-            if (pos == str.length()) {
+            int64_t int_val = std::stoll(trimmed, &pos);
+            if (pos == trimmed.length()) {
                 result.value = int_val;
                 return result;
             }
         } catch (...) {}
         
-        // Try float
+        // Try float (including inf and nan)
+        if (trimmed == "inf" || trimmed == "+inf") {
+            result.value = std::numeric_limits<double>::infinity();
+            return result;
+        }
+        if (trimmed == "-inf") {
+            result.value = -std::numeric_limits<double>::infinity();
+            return result;
+        }
+        if (trimmed == "nan" || trimmed == "+nan" || trimmed == "-nan") {
+            result.value = std::numeric_limits<double>::quiet_NaN();
+            return result;
+        }
+        
         try {
             size_t pos;
-            double float_val = std::stod(str, &pos);
-            if (pos == str.length()) {
+            double float_val = std::stod(trimmed, &pos);
+            if (pos == trimmed.length()) {
                 result.value = float_val;
                 return result;
             }
         } catch (...) {}
         
         // Default to string
-        result.value = str;
+        result.value = trimmed;
+        return result;
+    }
+    
+    static std::string parse_string(const std::string& str) {
+        std::string result;
+        result.reserve(str.length());
+        
+        for (size_t i = 1; i < str.length() - 1; ++i) {
+            if (str[i] == '\\' && i + 1 < str.length() - 1) {
+                switch (str[i + 1]) {
+                    case 'b': result += '\b'; ++i; break;
+                    case 't': result += '\t'; ++i; break;
+                    case 'n': result += '\n'; ++i; break;
+                    case 'f': result += '\f'; ++i; break;
+                    case 'r': result += '\r'; ++i; break;
+                    case '"': result += '"'; ++i; break;
+                    case '\\': result += '\\'; ++i; break;
+                    case 'u':
+                    case 'U': {
+                        // Unicode escape - simplified
+                        if (i + 5 < str.length()) {
+                            std::string hex = str.substr(i + 2, 4);
+                            try {
+                                int codepoint = std::stoi(hex, nullptr, 16);
+                                result += static_cast<char>(codepoint);
+                                i += 5;
+                            } catch (...) {
+                                result += str[i];
+                            }
+                        } else {
+                            result += str[i];
+                        }
+                        break;
+                    }
+                    default: result += str[i]; break;
+                }
+            } else {
+                result += str[i];
+            }
+        }
+        
         return result;
     }
     
@@ -171,7 +400,7 @@ private:
         size_t pos = 0;
         
         while (pos < content.length()) {
-            size_t comma = content.find(',', pos);
+            size_t comma = find_comma_outside_braces(content, pos);
             std::string elem;
             
             if (comma == std::string::npos) {
@@ -192,11 +421,18 @@ private:
     
     static void write_value(std::ofstream& file, const TOMLValue& value) {
         if (value.is_string()) {
-            file << "\"" << value.as_string() << "\"";
+            file << "\"" << escape_string(value.as_string()) << "\"";
         } else if (value.is_int()) {
             file << value.as_int();
         } else if (value.is_float()) {
-            file << std::setprecision(9) << value.as_float();
+            double v = value.as_float();
+            if (std::isinf(v)) {
+                file << (v > 0 ? "inf" : "-inf");
+            } else if (std::isnan(v)) {
+                file << "nan";
+            } else {
+                file << std::setprecision(15) << v;
+            }
         } else if (value.is_bool()) {
             file << (value.as_bool() ? "true" : "false");
         } else if (value.is_array()) {
@@ -207,16 +443,69 @@ private:
                 if (i < arr.size() - 1) file << ", ";
             }
             file << "]";
+        } else if (value.is_table()) {
+            file << "{";
+            const auto& tbl = value.as_table();
+            size_t i = 0;
+            for (const auto& [k, v] : tbl) {
+                file << k << " = ";
+                write_value(file, v);
+                if (++i < tbl.size()) file << ", ";
+            }
+            file << "}";
         }
+    }
+    
+    static void write_table(std::ofstream& file, const std::unordered_map<std::string, TOMLValue>& table) {
+        for (const auto& [key, value] : table) {
+            file << key << " = ";
+            write_value(file, value);
+            file << "\n";
+        }
+    }
+    
+    static std::string escape_string(const std::string& str) {
+        std::string result;
+        result.reserve(str.length() * 2);
+        
+        for (char c : str) {
+            switch (c) {
+                case '\\': result += "\\\\"; break;
+                case '"': result += "\\\""; break;
+                case '\b': result += "\\b"; break;
+                case '\t': result += "\\t"; break;
+                case '\n': result += "\\n"; break;
+                case '\f': result += "\\f"; break;
+                case '\r': result += "\\r"; break;
+                default:
+                    if (static_cast<unsigned char>(c) < 0x20) {
+                        char buf[7];
+                        snprintf(buf, sizeof(buf), "\\u%04x", c);
+                        result += buf;
+                    } else {
+                        result += c;
+                    }
+            }
+        }
+        
+        return result;
+    }
+    
+    static std::string get_timestamp() {
+        auto now = std::chrono::system_clock::now();
+        auto time = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss << std::put_time(std::localtime(&time), "%Y-%m-%dT%H:%M:%S");
+        return ss.str();
     }
 };
 
 // ============================================================================
-// Entropy Calculator for Code Prompt Detection
+// Shannon Entropy Calculator for Code Detection
 // ============================================================================
 class EntropyCalculator {
 public:
-    // Calculate Shannon entropy of a sequence
+    // Calculate Shannon entropy of a token sequence
     static float calculate_entropy(const std::vector<uint32_t>& tokens) {
         if (tokens.empty()) return 0.0f;
         
@@ -230,10 +519,23 @@ public:
         
         for (const auto& [token, count] : freq) {
             float p = static_cast<float>(count) / n;
-            entropy -= p * std::log2(p);
+            if (p > 0.0f) {
+                entropy -= p * std::log2(p);
+            }
         }
         
         return entropy;
+    }
+    
+    // Calculate normalized entropy (0.0 to 1.0)
+    static float calculate_normalized_entropy(const std::vector<uint32_t>& tokens) {
+        if (tokens.empty()) return 0.0f;
+        
+        float entropy = calculate_entropy(tokens);
+        float max_entropy = std::log2(static_cast<float>(tokens.size()));
+        
+        if (max_entropy <= 0.0f) return 0.0f;
+        return std::min(1.0f, entropy / max_entropy);
     }
     
     // Detect if prompt is likely code based on entropy patterns
@@ -241,42 +543,48 @@ public:
         if (tokens.size() < 10) return false;
         
         float entropy = calculate_entropy(tokens);
+        float normalized = calculate_normalized_entropy(tokens);
         
         // Code typically has moderate entropy (not too random, not too repetitive)
         // Entropy between 2.0 and 5.0 bits per token suggests structured content like code
-        return entropy > 2.0f && entropy < 5.0f;
+        // And normalized entropy between 0.3 and 0.8 suggests non-trivial structure
+        return (entropy > 2.0f && entropy < 5.0f && normalized > 0.3f && normalized < 0.8f);
     }
     
     // Calculate code-specific scoring bonus
     static float get_code_bonus(const std::vector<uint32_t>& tokens) {
         if (!is_likely_code(tokens)) return 0.0f;
         
+        // Calculate additional heuristics
+        float complexity = detect_code_complexity(tokens);
+        float structure_score = detect_structure_patterns(tokens);
+        
         // Boost priority for code-related packs when code is detected
-        return 0.15f; // 15% bonus for code prompts
+        return 0.15f + complexity * 0.1f + structure_score * 0.05f;
     }
     
-    // Advanced: Detect specific code patterns
+    // Detect specific code patterns
     static float detect_code_complexity(const std::vector<uint32_t>& tokens) {
         if (tokens.size() < 20) return 0.0f;
         
         // Look for repetitive patterns that suggest loops/functions
         std::unordered_map<uint32_t, std::vector<uint32_t>> positions;
-        for (uint32_t i = 0; i < tokens.size(); ++i) {
-            positions[tokens[i]].push_back(i);
+        for (size_t i = 0; i < tokens.size(); ++i) {
+            positions[tokens[i]].push_back(static_cast<uint32_t>(i));
         }
         
         float complexity = 0.0f;
         for (const auto& [token, pos_list] : positions) {
             if (pos_list.size() > 2) {
                 // Check for regular spacing (function calls, loops)
-                std::vector<uint32_t> diffs;
+                std::vector<float> diffs;
                 for (size_t i = 1; i < pos_list.size(); ++i) {
-                    diffs.push_back(pos_list[i] - pos_list[i-1]);
+                    diffs.push_back(static_cast<float>(pos_list[i] - pos_list[i-1]));
                 }
                 
                 float avg_diff = std::accumulate(diffs.begin(), diffs.end(), 0.0f) / diffs.size();
                 float variance = 0.0f;
-                for (uint32_t d : diffs) {
+                for (float d : diffs) {
                     variance += std::pow(d - avg_diff, 2);
                 }
                 variance /= diffs.size();
@@ -288,25 +596,91 @@ public:
             }
         }
         
-        return std::min(complexity, 1.0f);
+        return std::min(1.0f, complexity);
+    }
+    
+    // Detect structure patterns (indentation-like, brackets, etc.)
+    static float detect_structure_patterns(const std::vector<uint32_t>& tokens) {
+        if (tokens.size() < 30) return 0.0f;
+        
+        float score = 0.0f;
+        
+        // Look for alternating patterns (common in structured code)
+        std::unordered_map<uint32_t, uint32_t> pair_counts;
+        for (size_t i = 0; i < tokens.size() - 1; ++i) {
+            uint64_t pair = (static_cast<uint64_t>(tokens[i]) << 32) | tokens[i + 1];
+            pair_counts[static_cast<uint32_t>(pair & 0xFFFFFFFF)]++;
+        }
+        
+        // High repetition of specific pairs suggests structure
+        uint32_t max_count = 0;
+        for (const auto& [pair, count] : pair_counts) {
+            max_count = std::max(max_count, count);
+        }
+        
+        float repetition_ratio = static_cast<float>(max_count) / (tokens.size() - 1);
+        if (repetition_ratio > 0.05f && repetition_ratio < 0.3f) {
+            score += 0.2f;
+        }
+        
+        // Check for hierarchical structure using n-gram analysis
+        score += analyze_ngram_structure(tokens);
+        
+        return std::min(1.0f, score);
+    }
+    
+private:
+    static float analyze_ngram_structure(const std::vector<uint32_t>& tokens) {
+        if (tokens.size() < 50) return 0.0f;
+        
+        // Analyze trigram patterns
+        std::unordered_map<uint64_t, uint32_t> trigrams;
+        for (size_t i = 0; i < tokens.size() - 2; ++i) {
+            uint64_t tri = (static_cast<uint64_t>(tokens[i]) << 42) |
+                          (static_cast<uint64_t>(tokens[i+1]) << 21) |
+                          tokens[i+2];
+            trigrams[tri]++;
+        }
+        
+        // Calculate trigram diversity
+        float unique_ratio = static_cast<float>(trigrams.size()) / (tokens.size() - 2);
+        
+        // Code typically has moderate diversity
+        if (unique_ratio > 0.3f && unique_ratio < 0.8f) {
+            return 0.15f;
+        }
+        
+        return 0.0f;
     }
 };
 
 // ============================================================================
-// Enhanced LSTM Cell with Proper Gating
+// LSTM Cell with Forget/Input/Output Gates and Gradient Tracking
 // ============================================================================
 struct LSTMCell {
     static constexpr uint32_t INPUT_SIZE = 64;
     static constexpr uint32_t HIDDEN_SIZE = 32;
+    static constexpr float WEIGHT_CLIP = 5.0f;  // Prevent exploding gradients
     
-    // LSTM gate weights [hidden_size x (input_size + hidden_size)]
-    // Layout: [W | U] where W is input weights, U is recurrent weights
-    std::vector<float> Wf, Wi, Wc, Wo;  // Forget, Input, Candidate, Output gates
-    std::vector<float> bf, bi, bc, bo;  // Biases
+    // Gate weights [HIDDEN_SIZE x (INPUT_SIZE + HIDDEN_SIZE)]
+    // Order: Forget, Input, Candidate (Cell), Output gates
+    std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)> Wf, Wi, Wc, Wo;
+    std::array<float, HIDDEN_SIZE> bf, bi, bc, bo;
     
-    // Momentum for SGD
-    std::vector<float> mWf, mWi, mWc, mWo;
-    std::vector<float> mbf, mbi, mbc, mbo;
+    // Momentum buffers for SGD
+    std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)> mWf, mWi, mWc, mWo;
+    std::array<float, HIDDEN_SIZE> mbf, mbi, mbc, mbo;
+    
+    // Velocity buffers for Adam-style optimization (optional)
+    std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)> vWf, vWi, vWc, vWo;
+    std::array<float, HIDDEN_SIZE> vbf, vbi, vbc, vbo;
+    
+    // Gradient accumulators
+    std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)> gWf, gWi, gWc, gWo;
+    std::array<float, HIDDEN_SIZE> gbf, gbi, gbc, gbo;
+    
+    // Adam optimizer state
+    uint32_t timestep = 0;
     
     LSTMCell() : rng_(std::random_device{}()) {
         initialize_weights();
@@ -314,131 +688,266 @@ struct LSTMCell {
     }
     
     void initialize_weights() {
-        const uint32_t total_input_size = INPUT_SIZE + HIDDEN_SIZE;
+        const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
         
-        // Xavier initialization
-        auto init_matrix = [&](std::vector<float>& mat, uint32_t rows, uint32_t cols) {
-            mat.resize(rows * cols);
-            float xavier_scale = std::sqrt(2.0f / (rows + cols));
+        // Xavier/Glorot initialization
+        auto init_gate = [&](std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& gate, float bias_init = 0.0f) {
+            float xavier_scale = std::sqrt(2.0f / (HIDDEN_SIZE + total_input));
             std::normal_distribution<float> dist(0.0f, xavier_scale);
-            for (auto& w : mat) w = dist(rng_);
+            for (auto& w : gate) w = dist(rng_);
         };
         
-        init_matrix(Wf, HIDDEN_SIZE, total_input_size);
-        init_matrix(Wi, HIDDEN_SIZE, total_input_size);
-        init_matrix(Wc, HIDDEN_SIZE, total_input_size);
-        init_matrix(Wo, HIDDEN_SIZE, total_input_size);
+        init_gate(Wf, 1.0f);  // Forget gate bias starts at 1.0
+        init_gate(Wi);
+        init_gate(Wc);
+        init_gate(Wo);
         
-        // Initialize biases - forget gate bias to 1.0 for better gradient flow
-        bf.resize(HIDDEN_SIZE, 1.0f);
-        bi.resize(HIDDEN_SIZE, 0.0f);
-        bc.resize(HIDDEN_SIZE, 0.0f);
-        bo.resize(HIDDEN_SIZE, 0.0f);
+        // Initialize biases
+        bf.fill(1.0f);  // Forget gate: start open
+        bi.fill(0.0f);  // Input gate: start closed
+        bc.fill(0.0f);  // Candidate: centered
+        bo.fill(0.0f);  // Output gate: start closed
     }
     
     void initialize_momentum() {
-        mWf.assign(Wf.size(), 0.0f);
-        mWi.assign(Wi.size(), 0.0f);
-        mWc.assign(Wc.size(), 0.0f);
-        mWo.assign(Wo.size(), 0.0f);
-        mbf.assign(HIDDEN_SIZE, 0.0f);
-        mbi.assign(HIDDEN_SIZE, 0.0f);
-        mbc.assign(HIDDEN_SIZE, 0.0f);
-        mbo.assign(HIDDEN_SIZE, 0.0f);
+        mWf.fill(0.0f); mWi.fill(0.0f); mWc.fill(0.0f); mWo.fill(0.0f);
+        mbf.fill(0.0f); mbi.fill(0.0f); mbc.fill(0.0f); mbo.fill(0.0f);
+        vWf.fill(0.0f); vWi.fill(0.0f); vWc.fill(0.0f); vWo.fill(0.0f);
+        vbf.fill(0.0f); vbi.fill(0.0f); vbc.fill(0.0f); vbo.fill(0.0f);
+        clear_gradients();
     }
     
-    // Forward pass - returns new hidden and cell states
+    void clear_gradients() {
+        gWf.fill(0.0f); gWi.fill(0.0f); gWc.fill(0.0f); gWo.fill(0.0f);
+        gbf.fill(0.0f); gbi.fill(0.0f); gbc.fill(0.0f); gbo.fill(0.0f);
+    }
+    
+    // Forward pass with caching for backprop
     struct State {
-        std::vector<float> h;  // Hidden state
-        std::vector<float> c;  // Cell state
+        std::array<float, HIDDEN_SIZE> h;  // Hidden state
+        std::array<float, HIDDEN_SIZE> c;  // Cell state
         
-        // Intermediate values for backprop
-        std::vector<float> f_gate, i_gate, c_tilde, o_gate;
-        std::vector<float> concat_input;
+        // Cached intermediate values for backprop
+        std::array<float, HIDDEN_SIZE> f_gate, i_gate, c_tilde, o_gate;
+        std::array<float, INPUT_SIZE + HIDDEN_SIZE> concat_input;
+        std::array<float, HIDDEN_SIZE> tanh_c;  // Cached tanh(c) for output gate
     };
     
-    State forward(const std::vector<float>& input, const State& prev_state) {
+    State forward(const std::array<float, INPUT_SIZE>& input, const State& prev_state) {
         State next_state;
-        next_state.h.resize(HIDDEN_SIZE);
-        next_state.c.resize(HIDDEN_SIZE);
-        next_state.f_gate.resize(HIDDEN_SIZE);
-        next_state.i_gate.resize(HIDDEN_SIZE);
-        next_state.c_tilde.resize(HIDDEN_SIZE);
-        next_state.o_gate.resize(HIDDEN_SIZE);
+        next_state.h.fill(0.0f);
+        next_state.c.fill(0.0f);
         
         // Concatenate input and previous hidden state
-        next_state.concat_input.resize(INPUT_SIZE + HIDDEN_SIZE);
         std::copy(input.begin(), input.end(), next_state.concat_input.begin());
         std::copy(prev_state.h.begin(), prev_state.h.end(), next_state.concat_input.begin() + INPUT_SIZE);
         
-        // Forget gate: f = sigmoid(Wf * [x, h_prev] + bf)
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            float sum = bf[i];
-            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
-                sum += Wf[i * (INPUT_SIZE + HIDDEN_SIZE) + j] * next_state.concat_input[j];
-            }
-            next_state.f_gate[i] = sigmoid(sum);
-        }
-        
-        // Input gate: i = sigmoid(Wi * [x, h_prev] + bi)
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            float sum = bi[i];
-            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
-                sum += Wi[i * (INPUT_SIZE + HIDDEN_SIZE) + j] * next_state.concat_input[j];
-            }
-            next_state.i_gate[i] = sigmoid(sum);
-        }
-        
-        // Candidate: c_tilde = tanh(Wc * [x, h_prev] + bc)
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            float sum = bc[i];
-            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
-                sum += Wc[i * (INPUT_SIZE + HIDDEN_SIZE) + j] * next_state.concat_input[j];
-            }
-            next_state.c_tilde[i] = std::tanh(sum);
-        }
-        
-        // Cell state: c = f * c_prev + i * c_tilde
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            next_state.c[i] = next_state.f_gate[i] * prev_state.c[i] + 
-                             next_state.i_gate[i] * next_state.c_tilde[i];
-        }
-        
-        // Output gate: o = sigmoid(Wo * [x, h_prev] + bo)
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            float sum = bo[i];
-            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
-                sum += Wo[i * (INPUT_SIZE + HIDDEN_SIZE) + j] * next_state.concat_input[j];
-            }
-            next_state.o_gate[i] = sigmoid(sum);
-        }
-        
-        // Hidden state: h = o * tanh(c)
-        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
-            next_state.h[i] = next_state.o_gate[i] * std::tanh(next_state.c[i]);
-        }
+        // Compute all gates in parallel where possible
+        compute_forget_gate(next_state);
+        compute_input_gate(next_state);
+        compute_candidate(next_state);
+        compute_cell_state(next_state, prev_state);
+        compute_output_gate(next_state);
+        compute_hidden_state(next_state);
         
         return next_state;
     }
     
-    // Apply SGD with momentum update
-    void apply_sgd_momentum(float learning_rate, float momentum) {
-        auto update_with_momentum = [&](std::vector<float>& weights, 
-                                         std::vector<float>& momentum_buffer,
-                                         const std::vector<float>& gradients) {
-            for (size_t i = 0; i < weights.size(); ++i) {
-                momentum_buffer[i] = momentum * momentum_buffer[i] + learning_rate * gradients[i];
-                weights[i] += momentum_buffer[i];
+    // Accumulate gradients from backward pass
+    void accumulate_gradients(const State& state, const std::array<float, HIDDEN_SIZE>& dh_next,
+                              const std::array<float, HIDDEN_SIZE>& dc_next) {
+        // Backprop through time - simplified version
+        // dh = dh_next + gradients from this step
+        std::array<float, HIDDEN_SIZE> dh = dh_next;
+        
+        // Backprop through output gate
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            float do_gate = dh[i] * state.tanh_c[i];
+            float do_pre = do_gate * sigmoid_deriv(state.o_gate[i]);
+            
+            gbo[i] += do_pre;
+            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
+                gWo[i * (INPUT_SIZE + HIDDEN_SIZE) + j] += do_pre * state.concat_input[j];
+            }
+            
+            dh[i] = dh[i] * state.o_gate[i] * tanh_deriv(state.tanh_c[i]);
+        }
+        
+        // Add incoming cell gradient
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            dh[i] += dc_next[i];
+        }
+        
+        // Backprop through cell state
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            // Gradient through input gate
+            float di_gate = dh[i] * state.c_tilde[i];
+            float di_pre = di_gate * sigmoid_deriv(state.i_gate[i]);
+            gbi[i] += di_pre;
+            
+            // Gradient through candidate
+            float dc_tilde = dh[i] * state.i_gate[i];
+            float dc_pre = dc_tilde * tanh_deriv(state.c_tilde[i]);
+            gbc[i] += dc_pre;
+            
+            for (uint32_t j = 0; j < INPUT_SIZE + HIDDEN_SIZE; ++j) {
+                gWi[i * (INPUT_SIZE + HIDDEN_SIZE) + j] += di_pre * state.concat_input[j];
+                gWc[i * (INPUT_SIZE + HIDDEN_SIZE) + j] += dc_pre * state.concat_input[j];
+            }
+        }
+    }
+    
+    // Apply SGD with momentum and optional Adam
+    void apply_sgd_momentum(float learning_rate, float momentum, bool use_adam = false,
+                            float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f) {
+        timestep++;
+        
+        auto update_weights = [&](std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& weights,
+                                  std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& momentum_buf,
+                                  std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& velocity_buf,
+                                  std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& gradients,
+                                  bool use_adam) {
+            if (use_adam) {
+                for (size_t i = 0; i < weights.size(); ++i) {
+                    // Adam optimizer
+                    momentum_buf[i] = beta1 * momentum_buf[i] + (1.0f - beta1) * gradients[i];
+                    velocity_buf[i] = beta2 * velocity_buf[i] + (1.0f - beta2) * gradients[i] * gradients[i];
+                    
+                    float m_hat = momentum_buf[i] / (1.0f - std::pow(beta1, timestep));
+                    float v_hat = velocity_buf[i] / (1.0f - std::pow(beta2, timestep));
+                    
+                    weights[i] += learning_rate * m_hat / (std::sqrt(v_hat) + epsilon);
+                    weights[i] = std::clamp(weights[i], -WEIGHT_CLIP, WEIGHT_CLIP);
+                }
+            } else {
+                // SGD with momentum
+                for (size_t i = 0; i < weights.size(); ++i) {
+                    momentum_buf[i] = momentum * momentum_buf[i] + learning_rate * gradients[i];
+                    weights[i] += momentum_buf[i];
+                    weights[i] = std::clamp(weights[i], -WEIGHT_CLIP, WEIGHT_CLIP);
+                }
             }
         };
         
-        // Note: gradients would be computed during backprop
-        // This is a placeholder for the update mechanism
-        // In practice, gradients would be stored during backward pass
+        auto update_biases = [&](std::array<float, HIDDEN_SIZE>& biases,
+                                 std::array<float, HIDDEN_SIZE>& momentum_buf,
+                                 std::array<float, HIDDEN_SIZE>& velocity_buf,
+                                 std::array<float, HIDDEN_SIZE>& gradients,
+                                 bool use_adam) {
+            if (use_adam) {
+                for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+                    momentum_buf[i] = beta1 * momentum_buf[i] + (1.0f - beta1) * gradients[i];
+                    velocity_buf[i] = beta2 * velocity_buf[i] + (1.0f - beta2) * gradients[i] * gradients[i];
+                    
+                    float m_hat = momentum_buf[i] / (1.0f - std::pow(beta1, timestep));
+                    float v_hat = velocity_buf[i] / (1.0f - std::pow(beta2, timestep));
+                    
+                    biases[i] += learning_rate * m_hat / (std::sqrt(v_hat) + epsilon);
+                }
+            } else {
+                for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+                    momentum_buf[i] = momentum * momentum_buf[i] + learning_rate * gradients[i];
+                    biases[i] += momentum_buf[i];
+                }
+            }
+        };
+        
+        update_weights(Wf, mWf, vWf, gWf, use_adam);
+        update_weights(Wi, mWi, vWi, gWi, use_adam);
+        update_weights(Wc, mWc, vWc, gWc, use_adam);
+        update_weights(Wo, mWo, vWo, gWo, use_adam);
+        
+        update_biases(bf, mbf, vbf, gbf, use_adam);
+        update_biases(bi, mbi, vbi, gbi, use_adam);
+        update_biases(bc, mbc, vbc, gbc, use_adam);
+        update_biases(bo, mbo, vbo, gbo, use_adam);
+        
+        clear_gradients();
+    }
+    
+    // Get weight statistics for monitoring
+    struct WeightStats {
+        float mean, std, min, max;
+    };
+    
+    WeightStats get_weight_stats(const std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& weights) {
+        WeightStats stats;
+        float sum = 0.0f, sum_sq = 0.0f;
+        stats.min = std::numeric_limits<float>::max();
+        stats.max = std::numeric_limits<float>::lowest();
+        
+        for (float w : weights) {
+            sum += w;
+            sum_sq += w * w;
+            stats.min = std::min(stats.min, w);
+            stats.max = std::max(stats.max, w);
+        }
+        
+        stats.mean = sum / weights.size();
+        stats.std = std::sqrt(sum_sq / weights.size() - stats.mean * stats.mean);
+        
+        return stats;
     }
     
 private:
     std::mt19937 rng_;
+    
+    void compute_forget_gate(State& state) {
+        const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            float sum = bf[i];
+            for (uint32_t j = 0; j < total_input; ++j) {
+                sum += Wf[i * total_input + j] * state.concat_input[j];
+            }
+            state.f_gate[i] = sigmoid(sum);
+        }
+    }
+    
+    void compute_input_gate(State& state) {
+        const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            float sum = bi[i];
+            for (uint32_t j = 0; j < total_input; ++j) {
+                sum += Wi[i * total_input + j] * state.concat_input[j];
+            }
+            state.i_gate[i] = sigmoid(sum);
+        }
+    }
+    
+    void compute_candidate(State& state) {
+        const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            float sum = bc[i];
+            for (uint32_t j = 0; j < total_input; ++j) {
+                sum += Wc[i * total_input + j] * state.concat_input[j];
+            }
+            state.c_tilde[i] = std::tanh(sum);
+        }
+    }
+    
+    void compute_cell_state(State& state, const State& prev_state) {
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            state.c[i] = state.f_gate[i] * prev_state.c[i] + state.i_gate[i] * state.c_tilde[i];
+        }
+    }
+    
+    void compute_output_gate(State& state) {
+        const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            float sum = bo[i];
+            for (uint32_t j = 0; j < total_input; ++j) {
+                sum += Wo[i * total_input + j] * state.concat_input[j];
+            }
+            state.o_gate[i] = sigmoid(sum);
+        }
+    }
+    
+    void compute_hidden_state(State& state) {
+        for (uint32_t i = 0; i < HIDDEN_SIZE; ++i) {
+            state.tanh_c[i] = std::tanh(state.c[i]);
+            state.h[i] = state.o_gate[i] * state.tanh_c[i];
+        }
+    }
     
     static float sigmoid(float x) {
         if (x >= 0) {
@@ -449,45 +958,86 @@ private:
             return z / (1.0f + z);
         }
     }
-};
-
-// Output layer for prediction
-struct OutputLayer {
-    static constexpr uint32_t INPUT_SIZE = LSTMCell::HIDDEN_SIZE;
     
-    std::vector<float> W;  // Weights: 1 x INPUT_SIZE
-    float b;               // Bias
-    
-    // Momentum for SGD
-    std::vector<float> mW;
-    float mb;
-    
-    OutputLayer() : rng_(std::random_device{}()) {
-        W.resize(INPUT_SIZE);
-        std::uniform_real_distribution<float> dist(-0.01f, 0.01f);
-        for (auto& w : W) w = dist(rng_);
-        b = 0.0f;
-        
-        mW.assign(INPUT_SIZE, 0.0f);
-        mb = 0.0f;
+    static float sigmoid_deriv(float sigmoid_out) {
+        return sigmoid_out * (1.0f - sigmoid_out);
     }
     
-    float forward(const std::vector<float>& hidden) {
-        float sum = b;
+    static float tanh_deriv(float tanh_out) {
+        return 1.0f - tanh_out * tanh_out;
+    }
+};
+
+// ============================================================================
+// Output Layer with Confidence Prediction
+// ============================================================================
+struct OutputLayer {
+    static constexpr uint32_t INPUT_SIZE = LSTMCell::HIDDEN_SIZE;
+    static constexpr uint32_t OUTPUT_SIZE = 1;  // Binary: will pack be needed?
+    
+    std::array<float, OUTPUT_SIZE * INPUT_SIZE> W;
+    std::array<float, OUTPUT_SIZE> b;
+    
+    // Momentum buffers
+    std::array<float, OUTPUT_SIZE * INPUT_SIZE> mW;
+    std::array<float, OUTPUT_SIZE> mb;
+    std::array<float, OUTPUT_SIZE * INPUT_SIZE> vW;
+    std::array<float, OUTPUT_SIZE> vb;
+    
+    uint32_t timestep = 0;
+    
+    OutputLayer() : rng_(std::random_device{}()) {
+        initialize_weights();
+    }
+    
+    void initialize_weights() {
+        std::uniform_real_distribution<float> dist(-0.01f, 0.01f);
+        for (auto& w : W) w = dist(rng_);
+        b.fill(0.0f);
+        mW.fill(0.0f);
+        mb.fill(0.0f);
+        vW.fill(0.0f);
+        vb.fill(0.0f);
+    }
+    
+    float forward(const std::array<float, INPUT_SIZE>& hidden) {
+        float sum = b[0];
         for (uint32_t i = 0; i < INPUT_SIZE; ++i) {
             sum += W[i] * hidden[i];
         }
         return sigmoid(sum);
     }
     
-    void apply_sgd_momentum(float learning_rate, float momentum, 
-                            const std::vector<float>& grad_W, float grad_b) {
+    // Compute gradients for hidden state
+    std::array<float, INPUT_SIZE> backward(float prediction, float target,
+                                           const std::array<float, INPUT_SIZE>& hidden,
+                                           float learning_rate, float momentum) {
+        // Binary cross-entropy gradient
+        float error = target - prediction;
+        float sigmoid_deriv = prediction * (1.0f - prediction);
+        float gradient = error * sigmoid_deriv;
+        
+        // Accumulate gradients for weights
         for (uint32_t i = 0; i < INPUT_SIZE; ++i) {
-            mW[i] = momentum * mW[i] + learning_rate * grad_W[i];
+            mW[i] = momentum * mW[i] + learning_rate * gradient * hidden[i];
             W[i] += mW[i];
         }
-        mb = momentum * mb + learning_rate * grad_b;
-        b += mb;
+        mb[0] = momentum * mb[0] + learning_rate * gradient;
+        b[0] += mb[0];
+        
+        // Return gradient for hidden state
+        std::array<float, INPUT_SIZE> dh;
+        for (uint32_t i = 0; i < INPUT_SIZE; ++i) {
+            dh[i] = gradient * W[i];
+        }
+        return dh;
+    }
+    
+    float compute_loss(float prediction, float target) {
+        // Binary cross-entropy
+        float epsilon = 1e-7f;
+        prediction = std::clamp(prediction, epsilon, 1.0f - epsilon);
+        return -(target * std::log(prediction) + (1.0f - target) * std::log(1.0f - prediction));
     }
     
 private:
@@ -498,23 +1048,26 @@ private:
     }
 };
 
-// Per-pack hidden state for temporal modeling with LSTM
+// ============================================================================
+// Per-Pack LSTM State with Temporal Tracking
+// ============================================================================
 struct PackLSTMState {
     LSTMCell::State state;
-    uint64_t last_update = 0;
-    std::deque<std::vector<float>> recent_features;
+    uint64_t last_access_time;
+    uint64_t access_count;
+    std::deque<std::array<float, LSTMCell::INPUT_SIZE>> recent_features;
     static constexpr uint32_t MAX_HISTORY = 10;
     
-    // LSTM cell for this pack (each pack has its own cell)
+    // LSTM cell for this pack
     std::unique_ptr<LSTMCell> lstm_cell;
     
-    PackLSTMState() {
-        state.h.resize(LSTMCell::HIDDEN_SIZE, 0.0f);
-        state.c.resize(LSTMCell::HIDDEN_SIZE, 0.0f);
+    PackLSTMState() : last_access_time(0), access_count(0) {
+        state.h.fill(0.0f);
+        state.c.fill(0.0f);
         lstm_cell = std::make_unique<LSTMCell>();
     }
     
-    void update(const std::vector<float>& features) {
+    void update(const std::array<float, LSTMCell::INPUT_SIZE>& features) {
         // Keep recent feature history
         recent_features.push_back(features);
         if (recent_features.size() > MAX_HISTORY) {
@@ -523,64 +1076,141 @@ struct PackLSTMState {
         
         // Update LSTM state
         state = lstm_cell->forward(features, state);
-        last_update = get_current_time_ns();
+        last_access_time = get_current_time_ns();
+        access_count++;
     }
     
-    // Get LSTM cell reference for training
     LSTMCell* get_cell() { return lstm_cell.get(); }
+    
+    float get_temporal_decay(float decay_seconds = 60.0f) const {
+        uint64_t age_ns = get_current_time_ns() - last_access_time;
+        float age_sec = static_cast<float>(age_ns) / 1e9f;
+        return std::exp(-age_sec / decay_seconds);
+    }
 };
 
-// Training buffer for online learning with SGD momentum
+// ============================================================================
+// Training Sample Buffer with Priority Replay
+// ============================================================================
 struct TrainingBuffer {
     struct Sample {
-        std::vector<float> features;
+        std::array<float, LSTMCell::INPUT_SIZE> features;
         LSTMCell::State hidden_state;
-        float target;  // 1.0 if pack was used, 0.0 otherwise
+        float target;
         float predicted;
+        float loss;
         uint64_t timestamp;
+        uint32_t priority;
     };
     
     std::deque<Sample> samples;
-    static constexpr uint32_t MAX_SAMPLES = 1000;
+    static constexpr uint32_t MAX_SAMPLES = 2000;
+    static constexpr uint32_t MINI_BATCH_SIZE = 32;
     
-    void add(const std::vector<float>& features, const LSTMCell::State& hidden,
-             float target, float predicted) {
+    // Priority sampling weights
+    std::vector<float> priorities;
+    
+    void add(const std::array<float, LSTMCell::INPUT_SIZE>& features,
+             const LSTMCell::State& hidden, float target, float predicted) {
         Sample sample;
         sample.features = features;
         sample.hidden_state = hidden;
         sample.target = target;
         sample.predicted = predicted;
+        sample.loss = std::abs(target - predicted);
         sample.timestamp = get_current_time_ns();
+        sample.priority = static_cast<uint32_t>(sample.loss * 1000);  // Higher loss = higher priority
         
         samples.push_back(sample);
         if (samples.size() > MAX_SAMPLES) {
             samples.pop_front();
         }
+        
+        update_priorities();
+    }
+    
+    std::vector<Sample> sample_mini_batch(uint32_t batch_size = MINI_BATCH_SIZE) {
+        std::vector<Sample> batch;
+        batch.reserve(std::min(batch_size, static_cast<uint32_t>(samples.size())));
+        
+        if (samples.empty()) return batch;
+        
+        // Priority-based sampling
+        std::vector<uint32_t> indices(samples.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        
+        // Sort by priority (descending)
+        std::sort(indices.begin(), indices.end(), [this](uint32_t a, uint32_t b) {
+            return priorities[a] > priorities[b];
+        });
+        
+        // Take top samples
+        uint32_t n = std::min(batch_size, static_cast<uint32_t>(indices.size()));
+        for (uint32_t i = 0; i < n; ++i) {
+            batch.push_back(samples[indices[i]]);
+        }
+        
+        return batch;
     }
     
     void clear() {
         samples.clear();
+        priorities.clear();
+    }
+    
+    float get_average_loss() const {
+        if (samples.empty()) return 0.0f;
+        float total = 0.0f;
+        for (const auto& s : samples) total += s.loss;
+        return total / samples.size();
+    }
+    
+private:
+    void update_priorities() {
+        priorities.resize(samples.size());
+        size_t i = 0;
+        for (const auto& s : samples) {
+            priorities[i++] = s.priority + 1.0f;  // Add 1 to ensure non-zero
+        }
     }
 };
 
 // ============================================================================
-// VitalityOracle Implementation with LSTM + SGD Momentum
+// Full VitalityOracle Implementation
 // ============================================================================
 class VitalityOracleImpl {
 public:
-    explicit VitalityOracleImpl(uint32_t max_packs_in_memory) 
+    explicit VitalityOracleImpl(uint32_t max_packs_in_memory)
         : max_packs_in_memory_(max_packs_in_memory),
           rng_(std::random_device{}()),
           base_learning_rate_(0.001f),
           momentum_(0.9f),
-          sgd_enabled_(true) {
+          sgd_enabled_(true),
+          use_adam_(false),
+          training_steps_(0),
+          hit_rate_(0.0f),
+          total_predictions_(0),
+          correct_predictions_(0) {
+        
+        // Load configuration
+        auto& cfg = ConfigManager::instance();
+        base_learning_rate_ = cfg.get_float("vitality_oracle", "learning_rate", 0.001f);
+        momentum_ = cfg.get_float("vitality_oracle", "momentum", 0.9f);
+        sgd_enabled_ = cfg.get_bool("vitality_oracle", "sgd_enabled", true);
+        use_adam_ = cfg.get_bool("vitality_oracle", "use_adam", false);
+        
+        // Load model if exists
+        std::string model_path = cfg.get_string("vitality_oracle", "model_path", "vitality_oracle_model.toml");
+        if (std::filesystem::exists(model_path)) {
+            load_model(model_path);
+        }
     }
     
     VitalityScore score_pack(const PackMetadata& pack, const std::vector<uint32_t>& tokens,
                             uint32_t current_layer, const HardwareTelemetry& telemetry) {
         VitalityScore score;
         
-        // Extract features
+        // Extract features from current context
         auto features = extract_features(pack, tokens, current_layer, telemetry);
         
         // Get or create LSTM state for this pack
@@ -595,13 +1225,13 @@ public:
         score.temporal_score = compute_temporal_score(pack.pack_id);
         score.priority_bonus = compute_priority_bonus(pack);
         
-        // Entropy-based code detection bonus
+        // Entropy-based code detection
         float code_bonus = EntropyCalculator::get_code_bonus(tokens);
         float code_complexity = EntropyCalculator::detect_code_complexity(tokens);
         
         if (code_bonus > 0.0f) {
-            // Boost priority for code-related packs when code is detected
-            if (pack.type == PackType::ATTENTION_Q || pack.type == PackType::ATTENTION_K || 
+            // Boost priority for attention-related packs during code generation
+            if (pack.type == PackType::ATTENTION_Q || pack.type == PackType::ATTENTION_K ||
                 pack.type == PackType::ATTENTION_V) {
                 score.priority_bonus += code_bonus + code_complexity * 0.1f;
             }
@@ -626,20 +1256,23 @@ public:
         // Generate candidates for next layers
         for (uint32_t offset = 0; offset < lookahead; ++offset) {
             uint32_t layer = current_layer + offset;
-            if (layer >= 128) break;  // Sanity limit
+            if (layer >= 256) break;  // Sanity limit
             
             float layer_decay = 1.0f - static_cast<float>(offset) / lookahead * 0.5f;
             
-            // Score all packs that might be needed
+            // Score all packs
             for (const auto& [pack_id, pack_state] : pack_states_) {
-                // Simulate forward prediction using LSTM
+                // Forward prediction using LSTM
                 float predicted_score = output_layer_.forward(pack_state.state.h);
                 predicted_score *= layer_decay;
                 
                 // Add temporal decay based on last access
-                uint64_t age_ns = get_current_time_ns() - pack_state.last_update;
-                float age_score = std::exp(-static_cast<float>(age_ns) / 1e9f / 60.0f);  // 60 second decay
+                float age_score = pack_state.get_temporal_decay();
                 predicted_score *= age_score;
+                
+                // Add exploration bonus for rarely accessed packs
+                float exploration_bonus = 0.05f / (1.0f + static_cast<float>(pack_state.access_count) / 100.0f);
+                predicted_score += exploration_bonus;
                 
                 scored_packs.push_back({pack_id, predicted_score});
             }
@@ -647,7 +1280,7 @@ public:
         
         // Sort by score descending
         std::sort(scored_packs.begin(), scored_packs.end(),
-                 [](const auto& a, const auto& b) { return a.second > b.second; });
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
         
         // Return top predictions
         std::vector<uint64_t> predictions;
@@ -689,45 +1322,40 @@ public:
     }
     
     void update_model() {
-        if (training_buffer_.samples.size() < 32) return;
+        if (training_buffer_.samples.size() < TrainingBuffer::MINI_BATCH_SIZE) return;
         
-        // Online gradient descent with momentum and adaptive learning rate
-        float learning_rate = base_learning_rate_ * 
-            (1.0f / (1.0f + 0.001f * static_cast<float>(training_steps_)));
+        // Adaptive learning rate decay
+        float learning_rate = base_learning_rate_ *
+            (1.0f / (1.0f + 0.0001f * static_cast<float>(training_steps_)));
+        
+        // Sample mini-batch with priority
+        auto batch = training_buffer_.sample_mini_batch();
         
         float total_loss = 0.0f;
-        uint32_t num_updates = 0;
         
-        // Process recent samples with higher weight
-        for (const auto& sample : training_buffer_.samples) {
-            // Forward pass through output layer
+        // Train output layer
+        for (const auto& sample : batch) {
             float prediction = output_layer_.forward(sample.hidden_state.h);
+            float loss = output_layer_.compute_loss(prediction, sample.target);
+            total_loss += loss;
             
-            // Binary cross-entropy loss gradient
-            float error = sample.target - prediction;
-            total_loss += std::abs(error);
+            // Backprop through output layer
+            auto dh = output_layer_.backward(prediction, sample.target,
+                                             sample.hidden_state.h, learning_rate, momentum_);
             
-            // Backpropagate through output layer with SGD + momentum
-            float sigmoid_deriv = prediction * (1.0f - prediction);
-            float gradient = error * sigmoid_deriv;
-            
-            // Compute gradients for output layer
-            std::vector<float> grad_W(OutputLayer::INPUT_SIZE);
-            for (uint32_t i = 0; i < OutputLayer::INPUT_SIZE; ++i) {
-                grad_W[i] = gradient * sample.hidden_state.h[i];
+            // Accumulate gradients in corresponding LSTM cell
+            auto& pack_state = get_or_create_pack_state(sample.timestamp);  // Use timestamp as proxy ID
+            if (LSTMCell* cell = pack_state.get_cell()) {
+                std::array<float, LSTMCell::HIDDEN_SIZE> dc_next;
+                dc_next.fill(0.0f);
+                cell->accumulate_gradients(sample.hidden_state, dh, dc_next);
             }
-            float grad_b = gradient;
-            
-            // Apply SGD with momentum
-            output_layer_.apply_sgd_momentum(learning_rate, momentum_, grad_W, grad_b);
-            
-            num_updates++;
         }
         
-        // Train LSTM cells for each pack that had samples
-        for (const auto& [pack_id, pack_state] : pack_states_) {
+        // Apply updates to all LSTM cells
+        for (auto& [pack_id, pack_state] : pack_states_) {
             if (LSTMCell* cell = pack_state.get_cell()) {
-                cell->apply_sgd_momentum(learning_rate, momentum_);
+                cell->apply_sgd_momentum(learning_rate, momentum_, use_adam_);
             }
         }
         
@@ -735,19 +1363,22 @@ public:
         
         // Log training stats periodically
         if (training_steps_ % 100 == 0) {
-            float avg_loss = total_loss / num_updates;
-            std::cout << "[VitalityOracle] Training step " << training_steps_ 
-                     << ", avg_loss: " << avg_loss 
-                     << ", hit_rate: " << hit_rate_ 
-                     << ", lr: " << learning_rate 
-                     << ", momentum: " << momentum_ << std::endl;
+            float avg_loss = total_loss / batch.size();
+            float avg_buffer_loss = training_buffer_.get_average_loss();
+            std::cout << "[VitalityOracle] Training step " << training_steps_
+                      << ", avg_loss: " << avg_loss
+                      << ", buffer_loss: " << avg_buffer_loss
+                      << ", hit_rate: " << hit_rate_
+                      << ", lr: " << learning_rate
+                      << ", momentum: " << momentum_
+                      << ", optimizer: " << (use_adam_ ? "Adam" : "SGD")
+                      << std::endl;
         }
         
         // Clear buffer after training
         training_buffer_.clear();
     }
     
-    // Save model to TOML format
     void save_model(const std::string& path) {
         TOMLParser::TOMLDocument doc;
         
@@ -760,6 +1391,7 @@ public:
         doc["header"]["learning_rate"] = TOMLParser::TOMLValue{static_cast<double>(base_learning_rate_)};
         doc["header"]["momentum"] = TOMLParser::TOMLValue{static_cast<double>(momentum_)};
         doc["header"]["sgd_enabled"] = TOMLParser::TOMLValue{sgd_enabled_};
+        doc["header"]["use_adam"] = TOMLParser::TOMLValue{use_adam_};
         
         // Output layer weights
         TOMLParser::TOMLValue W_array;
@@ -768,14 +1400,29 @@ public:
             W_array.as_array().push_back(TOMLParser::TOMLValue{static_cast<double>(w)});
         }
         doc["output_layer"]["W"] = W_array;
-        doc["output_layer"]["b"] = TOMLParser::TOMLValue{static_cast<double>(output_layer_.b)};
+        doc["output_layer"]["b"] = TOMLParser::TOMLValue{static_cast<double>(output_layer_.b[0])};
         
-        // Save representative LSTM cell (shared across packs in this implementation)
-        // In a full implementation, each pack would have its own LSTM cell
-        if (!pack_states_.empty()) {
-            auto it = pack_states_.begin();
-            if (LSTMCell* cell = it->second.get_cell()) {
-                save_lstm_weights(doc, "lstm", *cell);
+        // Save pack-specific LSTM states
+        for (const auto& [pack_id, pack_state] : pack_states_) {
+            if (LSTMCell* cell = const_cast<PackLSTMState&>(pack_state).get_cell()) {
+                std::string section = "lstm.pack_" + std::to_string(pack_id);
+                save_lstm_weights(doc, section, *cell);
+                
+                // Save state
+                TOMLParser::TOMLValue h_array, c_array;
+                h_array.value = std::vector<TOMLParser::TOMLValue>();
+                c_array.value = std::vector<TOMLParser::TOMLValue>();
+                
+                for (float v : pack_state.state.h) {
+                    h_array.as_array().push_back(TOMLParser::TOMLValue{static_cast<double>(v)});
+                }
+                for (float v : pack_state.state.c) {
+                    c_array.as_array().push_back(TOMLParser::TOMLValue{static_cast<double>(v)});
+                }
+                
+                doc[section]["hidden_state"] = h_array;
+                doc[section]["cell_state"] = c_array;
+                doc[section]["access_count"] = TOMLParser::TOMLValue{static_cast<int64_t>(pack_state.access_count)};
             }
         }
         
@@ -786,7 +1433,6 @@ public:
         }
     }
     
-    // Load model from TOML format
     void load_model(const std::string& path) {
         TOMLParser::TOMLDocument doc = TOMLParser::parse(path);
         
@@ -833,6 +1479,11 @@ public:
             if (it != header.end() && it->second.is_bool()) {
                 sgd_enabled_ = it->second.as_bool();
             }
+            
+            it = header.find("use_adam");
+            if (it != header.end() && it->second.is_bool()) {
+                use_adam_ = it->second.as_bool();
+            }
         }
         
         // Parse output layer
@@ -851,64 +1502,110 @@ public:
             
             it = output.find("b");
             if (it != output.end() && it->second.is_float()) {
-                output_layer_.b = static_cast<float>(it->second.as_float());
+                output_layer_.b[0] = static_cast<float>(it->second.as_float());
             }
         }
         
-        // Parse LSTM weights
-        if (doc.find("lstm") != doc.end()) {
-            // Load into a representative cell
-            if (!pack_states_.empty()) {
-                auto it = pack_states_.begin();
-                if (LSTMCell* cell = it->second.get_cell()) {
-                    load_lstm_weights(doc["lstm"], *cell);
+        // Parse pack-specific LSTM weights and states
+        for (const auto& [section, table] : doc) {
+            if (section.find("lstm.pack_") == 0) {
+                uint64_t pack_id = std::stoull(section.substr(10));
+                
+                auto& pack_state = get_or_create_pack_state(pack_id);
+            if (LSTMCell* cell = const_cast<PackLSTMState&>(pack_state).get_cell()) {
+                    load_lstm_weights(table, *cell);
+                    
+                    // Load state if available
+                    auto h_it = table.find("hidden_state");
+                    if (h_it != table.end() && h_it->second.is_array()) {
+                        const auto& h_array = h_it->second.as_array();
+                        for (size_t i = 0; i < h_array.size() && i < LSTMCell::HIDDEN_SIZE; ++i) {
+                            if (h_array[i].is_float()) {
+                                pack_state.state.h[i] = static_cast<float>(h_array[i].as_float());
+                            }
+                        }
+                    }
+                    
+                    auto c_it = table.find("cell_state");
+                    if (c_it != table.end() && c_it->second.is_array()) {
+                        const auto& c_array = c_it->second.as_array();
+                        for (size_t i = 0; i < c_array.size() && i < LSTMCell::HIDDEN_SIZE; ++i) {
+                            if (c_array[i].is_float()) {
+                                pack_state.state.c[i] = static_cast<float>(c_array[i].as_float());
+                            }
+                        }
+                    }
+                    
+                    auto acc_it = table.find("access_count");
+                    if (acc_it != table.end() && acc_it->second.is_int()) {
+                        pack_state.access_count = static_cast<uint64_t>(acc_it->second.as_int());
+                    }
                 }
             }
         }
         
-        std::cout << "[VitalityOracle] Model loaded from TOML: " << path 
-                 << " (training_steps: " << training_steps_ << ")" << std::endl;
+        std::cout << "[VitalityOracle] Model loaded from TOML: " << path
+                  << " (training_steps: " << training_steps_ << ")" << std::endl;
     }
     
-    // SGD configuration
+    // Configuration
     void set_learning_rate(float lr) { base_learning_rate_ = lr; }
     float get_learning_rate() const { return base_learning_rate_; }
     void set_momentum(float m) { momentum_ = m; }
     float get_momentum() const { return momentum_; }
     void enable_sgd(bool enable) { sgd_enabled_ = enable; }
     bool is_sgd_enabled() const { return sgd_enabled_; }
+    void enable_adam(bool enable) { use_adam_ = enable; }
+    bool is_adam_enabled() const { return use_adam_; }
     
+    // Statistics
     float hit_rate() const { return hit_rate_; }
     uint64_t total_predictions() const { return total_predictions_; }
+    uint32_t get_training_steps() const { return training_steps_; }
+    
+    // Get LSTM weight statistics for debugging
+    void print_lstm_stats(uint64_t pack_id) {
+        auto it = pack_states_.find(pack_id);
+        if (it == pack_states_.end()) {
+            std::cout << "[VitalityOracle] Pack " << pack_id << " not found" << std::endl;
+            return;
+        }
+        
+        if (LSTMCell* cell = it->second.get_cell()) {
+            std::cout << "[VitalityOracle] LSTM stats for pack " << pack_id << ":" << std::endl;
+            
+            auto wf_stats = cell->get_weight_stats(cell->Wf);
+            std::cout << "  Forget gate weights: mean=" << wf_stats.mean
+                      << " std=" << wf_stats.std
+                      << " min=" << wf_stats.min
+                      << " max=" << wf_stats.max << std::endl;
+        }
+    }
     
 private:
     uint32_t max_packs_in_memory_;
     std::mt19937 rng_;
     
-    // Neural network components
     std::unordered_map<uint64_t, PackLSTMState> pack_states_;
     OutputLayer output_layer_;
     
-    // Training data
     std::deque<AccessRecord> recent_accesses_;
     static constexpr uint32_t max_access_history_ = 10000;
     TrainingBuffer training_buffer_;
     
-    // Last predictions for training
-    std::unordered_map<uint64_t, std::vector<float>> last_features_;
+    std::unordered_map<uint64_t, std::array<float, LSTMCell::INPUT_SIZE>> last_features_;
     std::unordered_map<uint64_t, LSTMCell::State> last_hidden_;
     std::unordered_map<uint64_t, float> last_prediction_;
     
-    // Training state with SGD momentum
     float base_learning_rate_;
     float momentum_;
     bool sgd_enabled_;
-    uint32_t training_steps_ = 0;
+    bool use_adam_;
+    uint32_t training_steps_;
     
-    // Statistics
-    float hit_rate_ = 0.0f;
-    uint64_t total_predictions_ = 0;
-    uint64_t correct_predictions_ = 0;
+    float hit_rate_;
+    uint64_t total_predictions_;
+    uint64_t correct_predictions_;
     
     PackLSTMState& get_or_create_pack_state(uint64_t pack_id) {
         auto it = pack_states_.find(pack_id);
@@ -918,16 +1615,17 @@ private:
         return it->second;
     }
     
-    std::vector<float> extract_features(const PackMetadata& pack, 
-                                       const std::vector<uint32_t>& tokens,
-                                       uint32_t current_layer, 
-                                       const HardwareTelemetry& telemetry) {
-        std::vector<float> features(LSTMCell::INPUT_SIZE, 0.0f);
+    std::array<float, LSTMCell::INPUT_SIZE> extract_features(const PackMetadata& pack,
+                                                              const std::vector<uint32_t>& tokens,
+                                                              uint32_t current_layer,
+                                                              const HardwareTelemetry& telemetry) {
+        std::array<float, LSTMCell::INPUT_SIZE> features;
+        features.fill(0.0f);
         
         // Pack metadata features
         features[0] = static_cast<float>(pack.layer_idx) / 128.0f;
         features[1] = static_cast<float>(pack.head_idx) / 64.0f;
-        features[2] = static_cast<float>(pack.type) / 255.0f;
+        features[2] = static_cast<float>(static_cast<int>(pack.type)) / 255.0f;
         features[3] = pack.base_priority;
         
         // Context features
@@ -944,37 +1642,40 @@ private:
         // Temporal features
         auto& pack_state = get_or_create_pack_state(pack.pack_id);
         features[11] = static_cast<float>(pack_state.recent_features.size()) / PackLSTMState::MAX_HISTORY;
+        features[12] = static_cast<float>(pack_state.access_count) / 1000.0f;
         
         // Token hash features (locality-sensitive hashing)
         uint64_t token_hash = hash_tokens(tokens);
         for (uint32_t i = 0; i < 8; ++i) {
-            features[12 + i] = static_cast<float>((token_hash >> (i * 8)) & 0xFF) / 255.0f;
+            features[13 + i] = static_cast<float>((token_hash >> (i * 8)) & 0xFF) / 255.0f;
         }
         
-        // Compute relevance score as feature
-        features[20] = compute_relevance(pack, tokens, current_layer);
-        features[21] = compute_hardware_score(pack, telemetry);
-        features[22] = compute_temporal_score(pack.pack_id);
+        // Computed scores as features
+        features[21] = compute_relevance(pack, tokens, current_layer);
+        features[22] = compute_hardware_score(pack, telemetry);
+        features[23] = compute_temporal_score(pack.pack_id);
         
         // Time-based cyclical features
         uint64_t time_ms = get_current_time_ms();
         float time_sec = static_cast<float>(time_ms % 1000000) / 1000.0f;
-        features[23] = std::sin(2.0f * 3.14159f * time_sec / 60.0f);  // Minute cycle
-        features[24] = std::cos(2.0f * 3.14159f * time_sec / 60.0f);
+        features[24] = std::sin(2.0f * 3.14159f * time_sec / 60.0f);
+        features[25] = std::cos(2.0f * 3.14159f * time_sec / 60.0f);
         
         // Pack size features
-        features[25] = static_cast<float>(pack.compressed_size) / (1024.0f * 1024.0f * 1024.0f);  // GB
-        features[26] = static_cast<float>(pack.decompressed_size) / (1024.0f * 1024.0f * 1024.0f);  // GB
+        features[26] = static_cast<float>(pack.compressed_size) / (1024.0f * 1024.0f * 1024.0f);
+        features[27] = static_cast<float>(pack.decompressed_size) / (1024.0f * 1024.0f * 1024.0f);
         
-        // Entropy features for code detection
+        // Entropy features
         float entropy = EntropyCalculator::calculate_entropy(tokens);
-        features[27] = entropy / 10.0f;  // Normalize
-        features[28] = EntropyCalculator::is_likely_code(tokens) ? 1.0f : 0.0f;
-        features[29] = EntropyCalculator::detect_code_complexity(tokens);
+        float normalized_entropy = EntropyCalculator::calculate_normalized_entropy(tokens);
+        features[28] = entropy / 10.0f;
+        features[29] = normalized_entropy;
+        features[30] = EntropyCalculator::is_likely_code(tokens) ? 1.0f : 0.0f;
+        features[31] = EntropyCalculator::detect_code_complexity(tokens);
         
-        // Fill remaining with noise for regularization
-        std::uniform_real_distribution<float> noise_dist(-0.1f, 0.1f);
-        for (uint32_t i = 30; i < LSTMCell::INPUT_SIZE; ++i) {
+        // Remaining features with small noise for regularization
+        std::uniform_real_distribution<float> noise_dist(-0.01f, 0.01f);
+        for (uint32_t i = 32; i < LSTMCell::INPUT_SIZE; ++i) {
             features[i] = noise_dist(rng_);
         }
         
@@ -982,26 +1683,23 @@ private:
     }
     
     uint64_t hash_tokens(const std::vector<uint32_t>& tokens) const {
-        uint64_t hash = 1469598103934665603ULL;  // FNV-1a offset basis
+        uint64_t hash = 1469598103934665603ULL;
         for (uint32_t token : tokens) {
             hash ^= token;
-            hash *= 1099511628211ULL;  // FNV-1a prime
+            hash *= 1099511628211ULL;
         }
         return hash;
     }
     
     float compute_relevance(const PackMetadata& pack, const std::vector<uint32_t>& tokens, uint32_t current_layer) {
-        // Layer proximity
         float layer_dist = std::abs(static_cast<float>(pack.layer_idx) - static_cast<float>(current_layer));
         float layer_score = std::exp(-layer_dist / 5.0f);
         
-        // Token-based relevance (simplified)
         float token_score = 0.5f;
         if (!tokens.empty()) {
             token_score = 0.5f + 0.3f * std::sin(static_cast<float>(tokens.back()) / 1000.0f);
         }
         
-        // Type-based relevance
         float type_weight = 0.7f;
         switch (pack.type) {
             case PackType::ATTENTION_Q:
@@ -1013,6 +1711,7 @@ private:
                 type_weight = 0.9f;
                 break;
             case PackType::NORM_GAMMA:
+            case PackType::NORM_BETA:
                 type_weight = 0.85f;
                 break;
             default:
@@ -1049,32 +1748,19 @@ private:
             return 0.5f;
         }
         
-        uint64_t age_ns = get_current_time_ns() - it->second.last_update;
-        float age_sec = static_cast<float>(age_ns) / 1e9f;
-        
-        return std::exp(-age_sec / 30.0f);
+        return it->second.get_temporal_decay();
     }
     
     float compute_priority_bonus(const PackMetadata& pack) {
-        return pack.base_priority * 0.7f + 
+        return pack.base_priority * 0.7f +
                (1.0f - static_cast<float>(pack.layer_idx) / 128.0f) * 0.3f;
     }
     
-    // TOML serialization helpers
     void save_lstm_weights(TOMLParser::TOMLDocument& doc, const std::string& section, const LSTMCell& cell) {
-        auto save_matrix = [&](const std::string& name, const std::vector<float>& mat) {
+        auto save_matrix = [&](const std::string& name, const auto& mat) {
             TOMLParser::TOMLValue arr;
             arr.value = std::vector<TOMLParser::TOMLValue>();
             for (float v : mat) {
-                arr.as_array().push_back(TOMLParser::TOMLValue{static_cast<double>(v)});
-            }
-            doc[section][name] = arr;
-        };
-        
-        auto save_vector = [&](const std::string& name, const std::vector<float>& vec) {
-            TOMLParser::TOMLValue arr;
-            arr.value = std::vector<TOMLParser::TOMLValue>();
-            for (float v : vec) {
                 arr.as_array().push_back(TOMLParser::TOMLValue{static_cast<double>(v)});
             }
             doc[section][name] = arr;
@@ -1084,19 +1770,18 @@ private:
         save_matrix("Wi", cell.Wi);
         save_matrix("Wc", cell.Wc);
         save_matrix("Wo", cell.Wo);
-        save_vector("bf", cell.bf);
-        save_vector("bi", cell.bi);
-        save_vector("bc", cell.bc);
-        save_vector("bo", cell.bo);
+        save_matrix("bf", cell.bf);
+        save_matrix("bi", cell.bi);
+        save_matrix("bc", cell.bc);
+        save_matrix("bo", cell.bo);
     }
     
     void load_lstm_weights(const TOMLParser::TOMLTable& table, LSTMCell& cell) {
-        auto load_matrix = [&](const std::string& name, std::vector<float>& mat) {
+        auto load_matrix = [&](const std::string& name, auto& mat) {
             auto it = table.find(name);
             if (it != table.end() && it->second.is_array()) {
                 const auto& arr = it->second.as_array();
-                mat.resize(arr.size());
-                for (size_t i = 0; i < arr.size(); ++i) {
+                for (size_t i = 0; i < arr.size() && i < mat.size(); ++i) {
                     if (arr[i].is_float()) {
                         mat[i] = static_cast<float>(arr[i].as_float());
                     }
@@ -1115,8 +1800,10 @@ private:
     }
 };
 
+// ============================================================================
 // Public API Implementation
-VitalityOracle::VitalityOracle(uint32_t max_packs_in_memory) 
+// ============================================================================
+VitalityOracle::VitalityOracle(uint32_t max_packs_in_memory)
     : pimpl_(std::make_unique<VitalityOracleImpl>(max_packs_in_memory)) {
 }
 
@@ -1178,6 +1865,18 @@ float VitalityOracle::get_learning_rate() const {
 
 void VitalityOracle::enable_sgd_training(bool enable) {
     pimpl_->enable_sgd(enable);
+}
+
+void VitalityOracle::enable_adam_training(bool enable) {
+    pimpl_->enable_adam(enable);
+}
+
+uint32_t VitalityOracle::get_training_steps() const {
+    return pimpl_->get_training_steps();
+}
+
+void VitalityOracle::print_lstm_stats(uint64_t pack_id) {
+    pimpl_->print_lstm_stats(pack_id);
 }
 
 } // namespace vk_symbiote

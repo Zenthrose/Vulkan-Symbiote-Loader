@@ -8,8 +8,13 @@
 #include <functional>
 #include <atomic>
 #include <future>
+#include <memory>
 
 namespace vk_symbiote {
+
+// Forward declarations
+class DefragManager;
+struct MigrationState;
 
 enum class PackType : uint8 {
     ATTENTION_Q = 0, ATTENTION_K = 1, ATTENTION_V = 2, ATTENTION_O = 3,
@@ -52,20 +57,25 @@ public:
     ExpectedVoid reset();
     MemoryPoolStats get_stats() const;
     uint64 max_allocatable_size() const { return max_block_size_; }
+    
+    // Time-limited defragmentation for background operation
+    void defragment_limited(uint32_t max_time_ms);
+    void defragment();
+    
 private:
     struct Block { uint64 offset = 0, size = 0; bool is_free = true; Block *left = nullptr, *right = nullptr; uint32 level = 0; };
     VkDevice device_; VmaAllocator vma_; bool is_vram_;
     VkBuffer backing_buffer_ = VK_NULL_HANDLE; VmaAllocation backing_allocation_ = nullptr;
     uint64 total_size_ = 0, max_block_size_ = 0; Block* root_block_ = nullptr;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     Block* split_block(Block* block, uint64 size);
     void destroy_tree(Block* block);
     Block* find_best_block(Block* node, uint64 size, uint64 alignment);
     Block* find_block_by_offset(Block* node, uint64 offset);
     void merge_with_neighbors(Block* block);
-    void defragment();
     void collect_used_blocks(Block* node, std::vector<std::pair<uint64, uint64>>& used_blocks);
     uint64 calculate_usable_size(uint64 requested, uint64 alignment);
+    void calculate_stats_recursive(Block* node, MemoryPoolStats& stats) const;
 };
 
 class NomadPack {
@@ -115,7 +125,6 @@ private:
     uint64 last_access_ = 0; 
     uint32 access_count_ = 0;
     
-    struct MigrationState;
     std::unique_ptr<MigrationState> migration_state_;
     
     Expected<std::vector<float>> decompress_zfp();
@@ -129,14 +138,37 @@ private:
     bool migrate_to_vram_sync();       // Synchronous fallback
 };
 
-class DefragManager;
+class DefragManager {
+public:
+    struct DefragStats {
+        uint64_t total_defrags = 0;
+        uint64_t total_time_ms = 0;
+        float avg_fragmentation_before = 0.0f;
+        float avg_fragmentation_after = 0.0f;
+        std::chrono::steady_clock::time_point last_defrag;
+    };
+
+    DefragManager(FractalMemoryAllocator* vram_alloc, FractalMemoryAllocator* ram_alloc);
+    ~DefragManager();
+    void start();
+    void stop();
+    void request_defrag(uint64_t priority = 100);
+    void set_interval(uint32_t interval_ms);
+    void set_threshold(float fragmentation_threshold);
+    bool is_running() const;
+    DefragStats get_stats() const;
+    
+private:
+    class Impl;
+    std::unique_ptr<Impl> pimpl_;
+};
 
 class PackManager {
 public:
     PackManager(VkDevice device, VkPhysicalDevice physical_device, VmaAllocator vma);
     ~PackManager();
     ExpectedVoid initialize(uint64 vram_budget, uint64 ram_budget);
-    Expected<std::shared_ptr<NomadPack> > get_or_load_pack(uint64 pack_id);
+    Expected<std::shared_ptr<NomadPack>> get_or_load_pack(uint64 pack_id);
     ExpectedVoid unload_pack(uint64 pack_id);
     ExpectedVoid prefetch_packs(const std::vector<uint64>& pack_ids, float confidence_threshold);
     ExpectedVoid evict_until(uint64 bytes_needed);
@@ -152,12 +184,15 @@ public:
     // Trigger background defragmentation
     void trigger_defrag();
     
+    // Get defrag statistics
+    DefragManager::DefragStats get_defrag_stats() const;
+    
     // Get timeline semaphore support status
     bool timeline_semaphores_supported() const;
     
 private:
     VkDevice device_; VkPhysicalDevice physical_device_; VmaAllocator vma_;
-    std::unordered_map<uint64, std::shared_ptr<NomadPack> > packs_;
+    std::unordered_map<uint64, std::shared_ptr<NomadPack>> packs_;
     std::unique_ptr<FractalMemoryAllocator> vram_allocator_;
     std::unique_ptr<FractalMemoryAllocator> ram_allocator_;
     std::unique_ptr<DefragManager> defrag_mgr_;

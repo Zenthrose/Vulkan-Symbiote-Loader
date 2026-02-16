@@ -7,6 +7,9 @@
 
 namespace vk_symbiote {
 
+// Forward declaration for PIMPL idiom
+class VitalityOracleImpl;
+
 struct VitalityScore {
     float relevance = 0.0f, hardware_score = 0.0f, temporal_score = 0.0f;
     float priority_bonus = 0.0f, confidence = 0.0f;
@@ -23,6 +26,10 @@ struct AccessRecord {
     uint64 pack_id = 0, timestamp = 0;
     bool was_used = false;
     float predicted_score = 0.0f;
+};
+
+struct LSTMWeightStats {
+    float mean = 0.0f, std = 0.0f, min = 0.0f, max = 0.0f;
 };
 
 class VitalityOracle {
@@ -45,9 +52,11 @@ public:
         weight_temporal_ = temporal; weight_priority_ = priority;
     }
 
-    float hit_rate() const noexcept { return hit_rate_; }
-    uint64 total_predictions() const noexcept { return total_predictions_; }
+    float hit_rate() const noexcept;
+    uint64 total_predictions() const noexcept;
+    uint32 get_training_steps() const;
 
+    // Model persistence with TOML format
     void save_model(const std::string& path);
     void load_model(const std::string& path);
     
@@ -59,18 +68,24 @@ public:
     void set_learning_rate(float lr);
     float get_learning_rate() const;
     void enable_sgd_training(bool enable);
+    
+    // Adam optimizer support
+    void enable_adam_training(bool enable);
+    bool is_adam_enabled() const;
+    
+    // Momentum configuration
+    void set_momentum(float m);
+    float get_momentum() const;
+    
+    // LSTM diagnostics
+    void print_lstm_stats(uint64 pack_id);
 
 private:
-    class VitalityOracleImpl;
     std::unique_ptr<VitalityOracleImpl> pimpl_;
     
     // Weights for backward compatibility
     float weight_relevance_ = 0.3f, weight_hardware_ = 0.25f;
     float weight_temporal_ = 0.2f, weight_priority_ = 0.25f;
-    
-    // Statistics
-    float hit_rate_ = 0.0f;
-    uint64 total_predictions_ = 0;
 };
 
 } // namespace vk_symbiote

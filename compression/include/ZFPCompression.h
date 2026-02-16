@@ -5,9 +5,13 @@
 #include <vector>
 #include <memory>
 
-// Forward declaration for ZFP library types
+// Include or forward declare ZFP library types
+#if defined(ZFP_ENABLED)
+#include <zfp.h>
+#else
 struct zfp_stream;
 struct zfp_field;
+#endif
 
 namespace compression {
 

@@ -8,6 +8,9 @@
 
 namespace vk_symbiote {
 
+// Forward declaration for PIMPL idiom
+class GGUFLoaderImpl;
+
 enum class GGUFValueType : uint32 {
     UINT8 = 0,
     INT8 = 1,
@@ -131,7 +134,6 @@ public:
 
 private:
     Path file_path_;
-    class GGUFLoaderImpl;
     std::unique_ptr<GGUFLoaderImpl> pimpl_;
 };
 

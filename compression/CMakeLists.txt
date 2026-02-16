@@ -24,21 +24,16 @@ endif()
 
 # Find and link ZFP
 set(ZFP_ENABLED FALSE)
-find_package(ZFP QUIET)
-if(ZFP_FOUND)
+# Skip find_package(ZFP) as it requires OpenMP which may not be properly detected
+# Instead, manually find ZFP in standard locations
+find_path(ZFP_INCLUDE_DIR zfp.h PATHS /usr/include /usr/local/include PATH_SUFFIXES zfp)
+find_library(ZFP_LIBRARY zfp PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu)
+
+if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
     set(ZFP_ENABLED TRUE)
-    message(STATUS "✅ ZFP compression enabled")
+    message(STATUS "✅ ZFP compression enabled (found at ${ZFP_LIBRARY})")
 else()
-    # Try to find ZFP in standard locations
-    find_path(ZFP_INCLUDE_DIR zfp.h PATHS /usr/include /usr/local/include PATH_SUFFIXES zfp)
-    find_library(ZFP_LIBRARY zfp PATHS /usr/lib /usr/local/lib)
-    
-    if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
-        set(ZFP_ENABLED TRUE)
-        message(STATUS "✅ ZFP compression enabled (found at ${ZFP_LIBRARY})")
-    else()
-        message(STATUS "⚠️  ZFP not found - lossy compression disabled")
-    endif()
+    message(STATUS "⚠️  ZFP not found - lossy compression disabled")
 endif()
 
 # Source files - only include implementation files when libraries are found

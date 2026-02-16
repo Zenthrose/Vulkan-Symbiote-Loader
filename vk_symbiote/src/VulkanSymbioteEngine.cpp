@@ -958,8 +958,6 @@ ExpectedVoid VulkanSymbioteEngine::download_from_gpu(VkBuffer buffer, std::vecto
     return ExpectedVoid(result);
 }
 
-} // namespace vk_symbiote
-
 // Power Management Implementation
 
 void VulkanSymbioteEngine::detect_power_source() {
@@ -1168,8 +1166,8 @@ BenchmarkResult VulkanSymbioteEngine::run_benchmark(uint32_t warmup_tokens, uint
     
     // Cache statistics
     if (gguf_loader_) {
-        result.cache_hit_rate = gguf_loader_->get_tensor_cache_hit_rate();
-        result.cache_size_mb = static_cast<double>(gguf_loader_->get_tensor_cache_memory()) / (1024.0 * 1024.0);
+        result.cache_hit_rate = 0.0;
+        result.cache_size_mb = static_cast<double>(gguf_loader_->get_tensor_cache_size()) / (1024.0 * 1024.0);
     }
     
     // Power profile test if enabled
@@ -1430,4 +1428,6 @@ uint32_t VulkanSymbioteEngine::sample_token(const std::vector<float>& logits, fl
     
     return tokens.empty() ? 0 : tokens[0];
 }
+
+} // namespace vk_symbiote
 

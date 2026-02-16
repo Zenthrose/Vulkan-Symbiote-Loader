@@ -4,6 +4,8 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <memory>
+#include <mutex>
 
 namespace vk_symbiote {
 
@@ -38,7 +40,7 @@ struct PerformanceConfig {
 struct PowerConfig {
     bool enable_power_saver = false;
     bool auto_detect_battery = true;
-    uint32 power_profile = 1;  // 0=high_perf, 1=balanced, 2=power_saver
+    uint32 power_profile = 1;
     uint32 battery_threshold_percent = 30;
     bool throttle_on_thermal = true;
     uint32 max_workgroup_size_battery = 64;
@@ -68,7 +70,7 @@ struct LoggingConfig {
 
 struct CodecConfig {
     bool enable_compression = true;
-    std::string algorithm = "hybrid";  // blosc2, zfp, hybrid
+    std::string algorithm = "hybrid";
     uint32 compression_level = 5;
     uint32 decompression_threads = 4;
     bool enable_blosc2 = true;
@@ -113,6 +115,12 @@ public:
     const std::string& model_path() const { return model_path_; }
     void set_model_path(const std::string& path) { model_path_ = path; }
     
+    // Getters for TOML config values
+    int get_int(const std::string& section, const std::string& key, int default_value) const;
+    float get_float(const std::string& section, const std::string& key, float default_value) const;
+    bool get_bool(const std::string& section, const std::string& key, bool default_value) const;
+    std::string get_string(const std::string& section, const std::string& key, const std::string& default_value) const;
+    
     // Validation
     bool validate_config() const;
     void print_config() const;
@@ -135,6 +143,9 @@ private:
     static std::unique_ptr<ConfigManager> instance_;
     static std::mutex instance_mutex_;
     
+    // TOML document storage
+    mutable std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>> toml_data_;
+    
     // Helper methods for legacy format
     void parse_memory_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_performance_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
@@ -142,17 +153,14 @@ private:
     void parse_power_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     void parse_benchmark_section(const std::unordered_map<std::string, std::variant<int, float, std::string>>& config);
     
-    // Forward declaration for TOML parser
-    struct TOMLParser;
-    
     // Helper methods for TOML parsing
-    void parse_memory_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_performance_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_logging_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_power_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_benchmark_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_codec_section_toml(const TOMLParser::TOMLDocument& doc);
-    void parse_model_section_toml(const TOMLParser::TOMLDocument& doc);
+    void parse_memory_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_performance_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_logging_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_power_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_benchmark_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_codec_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
+    void parse_model_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc);
 };
 
 } // namespace vk_symbiote

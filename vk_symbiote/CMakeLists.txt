@@ -84,14 +84,13 @@ message(STATUS "Found VMA header: ${VMA_INCLUDE_DIRS}/vk_mem_alloc.h")
 
 # Find ZFP for hybrid compression
 if(ENABLE_ZFP)
-    find_package(ZFP QUIET)
-    if(NOT ZFP_FOUND)
-        find_path(ZFP_INCLUDE_DIR zfp.h PATHS /usr/include /usr/local/include PATH_SUFFIXES zfp)
-        find_library(ZFP_LIBRARY zfp PATHS /usr/lib /usr/local/lib)
-        if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
-            set(ZFP_FOUND TRUE)
-            message(STATUS "✅ ZFP found for hybrid compression")
-        endif()
+    # Skip find_package(ZFP) as it requires OpenMP which may not be properly detected
+    # Use manual detection instead
+    find_path(ZFP_INCLUDE_DIR zfp.h PATHS /usr/include /usr/local/include PATH_SUFFIXES zfp)
+    find_library(ZFP_LIBRARY zfp PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu)
+    if(ZFP_INCLUDE_DIR AND ZFP_LIBRARY)
+        set(ZFP_FOUND TRUE)
+        message(STATUS "✅ ZFP found for hybrid compression")
     endif()
 endif()
 

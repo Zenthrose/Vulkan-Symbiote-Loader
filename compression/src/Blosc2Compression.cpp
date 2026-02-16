@@ -21,46 +21,45 @@ bool Blosc2Compression::initialize() {
     // Best-effort; return true on success or if already initialized
     static bool initialized = false;
     if (initialized) return true;
-    int rc = blosc2_init();
-    initialized = (rc == 0);
+    blosc2_init();
+    initialized = true;
     return initialized;
 }
 
 bool Blosc2Compression::compress(const void* src, size_t src_size, std::vector<uint8_t>& out) {
     if (!src || src_size == 0) { out.clear(); return true; }
-    
+
     // Use Blosc2 for optimal compression with proper parameters
     int compression_level = 5; // Balanced compression level
     int typesize = 4; // Assuming float32 data
-    int64_t nelems = static_cast<int64_t>(src_size / typesize);
-    
-    // Estimate compressed size with some overhead
-    size_t compressed_bound = blosc2_csize(typesize, nelems, compression_level);
-    out.resize(compressed_bound + BLOSC2_MAX_OVERHEAD);
-    
+    int32_t nelems = static_cast<int32_t>(src_size / typesize);
+
+    // Allocate output buffer with Blosc2 overhead
+    int32_t max_compressed = nelems * typesize + BLOSC2_MAX_OVERHEAD;
+    out.resize(max_compressed);
+
     // Compress using default codec (LZ4) with shuffle
-    int64_t compressed_bytes = blosc2_compress(src, nelems, typesize, out.data(), 
-                                              compressed_bound + BLOSC2_MAX_OVERHEAD,
-                                              compression_level, BLOSC_SHUFFLE, BLOSC_LZ4);
-    
+    int compressed_bytes = blosc2_compress(compression_level, BLOSC_SHUFFLE, typesize,
+                                              src, nelems * typesize, out.data(), max_compressed);
+
     if (compressed_bytes <= 0) {
         // Compression failed, fallback to raw copy
         out.resize(src_size);
         std::memcpy(out.data(), src, src_size);
         return true;
     }
-    
+
     out.resize(static_cast<size_t>(compressed_bytes));
     return true;
 }
 
 bool Blosc2Compression::decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) {
     if (!src_data || src_size == 0 || !dst) return false;
-    
-    int64_t decompressed_bytes = blosc2_decompress(src_data, src_size, dst, 
-                                                  decompressed_size, 0);
-    
-    return (decompressed_bytes == static_cast<int64_t>(decompressed_size));
+
+    int32_t decompressed_bytes = blosc2_decompress(src_data, static_cast<int32_t>(src_size),
+                                                     dst, static_cast<int32_t>(decompressed_size));
+
+    return (decompressed_bytes == static_cast<int32_t>(decompressed_size));
 }
 }
 #else
