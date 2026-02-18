@@ -32,6 +32,10 @@ endif()
 add_subdirectory(compression)
 add_subdirectory(vk_symbiote)
 
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
 # Summary
 message(STATUS "")
 message(STATUS "=== Vulkan Symbiote Loader Configuration ===")

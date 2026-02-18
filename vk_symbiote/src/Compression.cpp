@@ -14,7 +14,7 @@ public:
         const uint8_t* compressed_data,
         size_t compressed_size,
         uint64_t original_size,
-        uint32_t dims = 1) {
+        uint32_t /*dims*/ = 1) {
 
         std::vector<float> result(original_size, 0.0f);
         
@@ -63,16 +63,16 @@ private:
     }
 
     float decode_float(uint32_t mantissa, uint32_t bits) {
+        uint32_t value;
         if (bits <= 23) {
-            uint32_t value = mantissa << (23 - bits);
-            std::memcpy(&value, &value, 4);
-            return *reinterpret_cast<float*>(&value);
+            value = mantissa << (23 - bits);
         } else {
             uint32_t exp = bits - 23;
-            uint32_t value = mantissa >> exp;
-            std::memcpy(&value, &value, 4);
-            return *reinterpret_cast<float*>(&value);
+            value = mantissa >> exp;
         }
+        float result;
+        std::memcpy(&result, &value, sizeof(result));
+        return result;
     }
 
     size_t estimate_compressed_size(uint32_t count) const {
@@ -90,12 +90,12 @@ public:
         std::vector<float> result(original_size, 0.0f);
         
         const uint8_t* header = compressed_data;
-        uint32_t nbytes = *reinterpret_cast<const uint32_t*>(header);
+        (void)*reinterpret_cast<const uint32_t*>(header);  // nbytes
         uint32_t cbytes = *reinterpret_cast<const uint32_t*>(header + 4);
-        uint32_t blocksize = *reinterpret_cast<const uint32_t*>(header + 8);
+        (void)*reinterpret_cast<const uint32_t*>(header + 8);  // blocksize
         uint8_t codec = header[12];
-        uint8_t filters = header[13];
-        uint8_t typesize = header[14];
+        (void)header[13];  // filters
+        (void)header[14];  // typesize
         
         const uint8_t* data_ptr = compressed_data + 16;
         

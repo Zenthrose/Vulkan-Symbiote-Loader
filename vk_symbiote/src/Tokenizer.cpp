@@ -92,7 +92,7 @@ std::unique_ptr<Tokenizer> Tokenizer::from_gguf(const std::filesystem::path& ggu
     
     if (found_vocab && !vocab_map.empty()) {
         // Build tokenizer from loaded vocabulary
-        size_t vocab_size = vocab_list.size();
+        (void)vocab_list.size();  // Track vocab size
         tokenizer->vocab_ = vocab_list;
         tokenizer->token_to_id_map_ = vocab_map;
         

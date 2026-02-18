@@ -1,6 +1,8 @@
 #include "GGUFLoader.h"
 #include "ConfigManager.h"
+#include "Utils.h"
 #include "../../compression/include/Blosc2Compression.h"
+#include "../../compression/include/ZFPCompression.h"
 #include "../../compression/include/HybridCompression.h"
 #include <cstring>
 #include <algorithm>
@@ -18,17 +20,63 @@
 #include <chrono>
 #include <iostream>
 #include <shared_mutex>
-#include <queue>
 #include <functional>
 #include <optional>
+#include <regex>
 
 namespace vk_symbiote {
 
 // ============================================================================
-// Advanced Thread Pool with Work Stealing for 70B+ Model Loading
+// GGUFMetadataKV Implementation
+// ============================================================================
+std::string GGUFMetadataKV::get_string() const {
+    if (value_type != GGUFValueType::STRING || raw_value.size() < 8) return "";
+    uint64_t len = *reinterpret_cast<const uint64_t*>(raw_value.data());
+    if (len > raw_value.size() - 8) return "";
+    return std::string(reinterpret_cast<const char*>(raw_value.data() + 8), len);
+}
+
+uint32_t GGUFMetadataKV::get_uint32() const {
+    if (value_type != GGUFValueType::UINT32 || raw_value.size() < 4) return 0;
+    return *reinterpret_cast<const uint32_t*>(raw_value.data());
+}
+
+int32_t GGUFMetadataKV::get_int32() const {
+    if (value_type != GGUFValueType::INT32 || raw_value.size() < 4) return 0;
+    return *reinterpret_cast<const int32_t*>(raw_value.data());
+}
+
+float GGUFMetadataKV::get_float32() const {
+    if (value_type != GGUFValueType::FLOAT32 || raw_value.size() < 4) return 0.0f;
+    return *reinterpret_cast<const float*>(raw_value.data());
+}
+
+bool GGUFMetadataKV::get_bool() const {
+    if (value_type != GGUFValueType::BOOL || raw_value.size() < 1) return false;
+    return raw_value[0] != 0;
+}
+
+std::vector<uint8_t> GGUFMetadataKV::get_array_data() const {
+    if (value_type != GGUFValueType::ARRAY || raw_value.size() < 12) return {};
+    return std::vector<uint8_t>(raw_value.begin() + 12, raw_value.end());
+}
+
+GGUFValueType GGUFMetadataKV::get_array_element_type() const {
+    if (value_type != GGUFValueType::ARRAY || raw_value.size() < 4) 
+        return GGUFValueType::UINT8;
+    return static_cast<GGUFValueType>(*reinterpret_cast<const uint32_t*>(raw_value.data()));
+}
+
+// ============================================================================
+// WorkStealingThreadPool Implementation
 // ============================================================================
 class WorkStealingThreadPool {
 public:
+    struct TaskQueue {
+        std::queue<std::function<void()>> tasks;
+        std::mutex mutex;
+    };
+
     explicit WorkStealingThreadPool(size_t num_threads = std::thread::hardware_concurrency())
         : stop_(false), active_tasks_(0), next_queue_(0) {
         for (size_t i = 0; i < num_threads; ++i) {
@@ -77,11 +125,6 @@ public:
     size_t num_threads() const { return workers_.size(); }
 
 private:
-    struct TaskQueue {
-        std::queue<std::function<void()>> tasks;
-        std::mutex mutex;
-    };
-
     std::vector<std::thread> workers_;
     std::vector<std::unique_ptr<TaskQueue>> queues_;
     mutable std::mutex mutex_;
@@ -137,2043 +180,1352 @@ private:
 };
 
 // ============================================================================
-// Enhanced LRU Cache with TTL, Memory Pressure, and Hit Rate Tracking
+// TensorLRUCache Implementation
 // ============================================================================
-template<typename K, typename V>
-class EnhancedLRUCache {
-public:
-    struct CacheConfig {
-        size_t max_size = 100;
-        size_t max_memory_bytes = 0;  // 0 = unlimited
-        uint64_t ttl_ms = 0;  // 0 = no expiration
-        bool enable_stats = true;
-    };
+TensorLRUCache::TensorLRUCache(const TensorCacheConfig& config) 
+    : config_(config), current_memory_(0), hits_(0), misses_(0), evictions_(0) {}
 
-    struct CacheStats {
-        uint64_t hits = 0;
-        uint64_t misses = 0;
-        uint64_t evictions = 0;
-        size_t size = 0;
-        size_t memory_bytes = 0;
-    };
-
-    explicit EnhancedLRUCache(const CacheConfig& config = CacheConfig{})
-        : config_(config), current_memory_(0) {
-        if (config_.enable_stats) {
-            hits_ = 0;
-            misses_ = 0;
-            evictions_ = 0;
-        }
-    }
-
-    bool get(const K& key, V& value) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        auto it = cache_map_.find(key);
-        if (it == cache_map_.end()) {
-            if (config_.enable_stats) ++misses_;
-            return false;
-        }
-
-        // Check TTL
-        if (config_.ttl_ms > 0) {
-            uint64_t age_ms = get_current_time_ms() - it->second->timestamp;
-            if (age_ms > config_.ttl_ms) {
-                evict_entry(it->second);
-                if (config_.enable_stats) ++misses_;
-                return false;
-            }
-        }
-
-        // Move to front (most recently used)
-        cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
-        value = it->second->value;
-        it->second->timestamp = get_current_time_ms();
-        if (config_.enable_stats) ++hits_;
-        return true;
-    }
-
-    void put(const K& key, const V& value, size_t memory_cost = 0) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        auto it = cache_map_.find(key);
-        if (it != cache_map_.end()) {
-            current_memory_ -= it->second->memory_cost;
-            it->second->value = value;
-            it->second->memory_cost = memory_cost;
-            it->second->timestamp = get_current_time_ms();
-            current_memory_ += memory_cost;
-            cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
-            return;
-        }
-
-        // Evict oldest if at capacity or memory limit
-        while (should_evict(memory_cost)) {
-            if (cache_list_.empty()) break;
-            evict_entry(std::prev(cache_list_.end()));
-            if (config_.enable_stats) ++evictions_;
-        }
-
-        CacheEntry entry;
-        entry.key = key;
-        entry.value = value;
-        entry.memory_cost = memory_cost;
-        entry.timestamp = get_current_time_ms();
-
-        cache_list_.emplace_front(entry);
-        cache_map_[key] = cache_list_.begin();
-        current_memory_ += memory_cost;
-    }
-
-    bool contains(const K& key) const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return cache_map_.find(key) != cache_map_.end();
-    }
-
-    void clear() {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        cache_map_.clear();
-        cache_list_.clear();
-        current_memory_ = 0;
-    }
-
-    size_t size() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return cache_list_.size();
-    }
-
-    size_t memory_usage() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return current_memory_;
-    }
-
-    double hit_rate() const {
-        if (!config_.enable_stats) return 0.0;
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        uint64_t total = hits_ + misses_;
-        return total > 0 ? static_cast<double>(hits_) / static_cast<double>(total) : 0.0;
-    }
-
-    CacheStats get_stats() const {
-        if (!config_.enable_stats) return CacheStats{};
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        CacheStats stats;
-        stats.hits = hits_;
-        stats.misses = misses_;
-        stats.evictions = evictions_;
-        stats.size = cache_list_.size();
-        stats.memory_bytes = current_memory_;
-        return stats;
-    }
-
-    void record_hit() { if (config_.enable_stats) { std::unique_lock<std::shared_mutex> lock(mutex_); ++hits_; } }
-    void record_miss() { if (config_.enable_stats) { std::unique_lock<std::shared_mutex> lock(mutex_); ++misses_; } }
-
-    // Prefetch hint - mark entry as recently used without fetching
-    void touch(const K& key) {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        auto it = cache_map_.find(key);
-        if (it != cache_map_.end()) {
-            cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
-        }
-    }
-
-private:
-    struct CacheEntry {
-        K key;
-        V value;
-        size_t memory_cost = 0;
-        uint64_t timestamp = 0;
-    };
-
-    CacheConfig config_;
-    size_t current_memory_;
-    mutable std::list<CacheEntry> cache_list_;
-    mutable std::unordered_map<K, typename std::list<CacheEntry>::iterator> cache_map_;
-    mutable std::shared_mutex mutex_;
-    mutable uint64_t hits_ = 0;
-    mutable uint64_t misses_ = 0;
-    mutable uint64_t evictions_ = 0;
-
-    bool should_evict(size_t new_memory_cost) const {
-        if (config_.max_size > 0 && cache_list_.size() >= config_.max_size) return true;
-        if (config_.max_memory_bytes > 0 && current_memory_ + new_memory_cost > config_.max_memory_bytes) return true;
+bool TensorLRUCache::get(const std::string& tensor_name, std::vector<float>& out_data) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = cache_map_.find(tensor_name);
+    if (it == cache_map_.end()) {
+        ++misses_;
         return false;
     }
-
-    void evict_entry(typename std::list<CacheEntry>::iterator it) {
-        current_memory_ -= it->memory_cost;
-        cache_map_.erase(it->key);
-        cache_list_.erase(it);
-    }
-
-    static uint64_t get_current_time_ms() {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-    }
-};
-
-// ============================================================================
-// Comprehensive Vocabulary Parser with Full GGUF Tokenizer.ggml Support
-// ============================================================================
-class VocabularyParser {
-public:
-    struct TokenizerConfig {
-        std::string model_type = "gpt2";
-        bool add_bos_token = false;
-        bool add_eos_token = false;
-        uint32_t bos_token_id = 0;
-        uint32_t eos_token_id = 0;
-        uint32_t pad_token_id = 0;
-        uint32_t unk_token_id = 0;
-        std::string chat_template;
-        std::string pre_tokenizer;
-        bool add_space_prefix = true;
-        bool remove_extra_whitespaces = false;
-    };
-
-    struct BPEMerge {
-        std::string first;
-        std::string second;
-        uint32_t rank;
-    };
-
-    std::pair<std::vector<VocabularyEntry>, TokenizerConfig> parse_from_metadata(
-        std::istream& file,
-        const std::vector<GGUFMetadataKV>& metadata) {
-
-        std::vector<VocabularyEntry> vocab;
-        TokenizerConfig config;
-
-        // Parse tokenizer configuration first
-        for (const auto& kv : metadata) {
-            parse_tokenizer_config(kv, config);
-        }
-
-        // Parse vocabulary tokens
-        for (const auto& kv : metadata) {
-            if (kv.key == "tokenizer.ggml.tokens" && kv.value_type == GGUFValueType::ARRAY) {
-                vocab = parse_token_array(file, kv.value);
-            }
-        }
-
-        // Parse scores
-        for (const auto& kv : metadata) {
-            if (kv.key == "tokenizer.ggml.scores" && kv.value_type == GGUFValueType::ARRAY) {
-                parse_scores(kv.value, vocab);
-            }
-        }
-
-        // Parse token types
-        for (const auto& kv : metadata) {
-            if (kv.key == "tokenizer.ggml.token_type" && kv.value_type == GGUFValueType::ARRAY) {
-                parse_token_types(kv.value, vocab);
-            }
-        }
-
-        // Parse BPE merges
-        std::vector<BPEMerge> merges;
-        for (const auto& kv : metadata) {
-            if (kv.key == "tokenizer.ggml.merges" && kv.value_type == GGUFValueType::ARRAY) {
-                merges = parse_merges(file, kv.value);
-            }
-        }
-
-        // Parse added tokens
-        for (const auto& kv : metadata) {
-            if (kv.key == "tokenizer.ggml.added_tokens" && kv.value_type == GGUFValueType::ARRAY) {
-                parse_added_tokens(file, kv.value, vocab);
-            }
-        }
-
-        return {vocab, config};
-    }
-
-    const std::vector<BPEMerge>& get_merges() const { return merges_; }
-
-private:
-    std::vector<BPEMerge> merges_;
-
-    void parse_tokenizer_config(const GGUFMetadataKV& kv, TokenizerConfig& config) {
-        if (kv.key == "tokenizer.ggml.model" && kv.value_type == GGUFValueType::STRING) {
-            config.model_type = *static_cast<std::string*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.add_bos_token" && kv.value_type == GGUFValueType::BOOL) {
-            config.add_bos_token = *static_cast<bool*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.add_eos_token" && kv.value_type == GGUFValueType::BOOL) {
-            config.add_eos_token = *static_cast<bool*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.bos_token_id" && kv.value_type == GGUFValueType::UINT32) {
-            config.bos_token_id = *static_cast<uint32_t*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.eos_token_id" && kv.value_type == GGUFValueType::UINT32) {
-            config.eos_token_id = *static_cast<uint32_t*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.padding_token_id" && kv.value_type == GGUFValueType::UINT32) {
-            config.pad_token_id = *static_cast<uint32_t*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.unknown_token_id" && kv.value_type == GGUFValueType::UINT32) {
-            config.unk_token_id = *static_cast<uint32_t*>(kv.value);
-        } else if (kv.key == "tokenizer.chat_template" && kv.value_type == GGUFValueType::STRING) {
-            config.chat_template = *static_cast<std::string*>(kv.value);
-        } else if (kv.key == "tokenizer.ggml.pre" && kv.value_type == GGUFValueType::STRING) {
-            config.pre_tokenizer = *static_cast<std::string*>(kv.value);
+    
+    // Check TTL
+    if (config_.ttl_seconds > 0) {
+        uint64_t age_sec = (get_current_time_ns() - it->second->entry.timestamp) / 1000000000ULL;
+        if (age_sec > config_.ttl_seconds) {
+            // Expired - evict
+            current_memory_ -= it->second->entry.memory_cost;
+            cache_list_.erase(it->second);
+            cache_map_.erase(it);
+            ++misses_;
+            return false;
         }
     }
+    
+    // Move to front (most recently used)
+    cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
+    out_data = it->second->entry.data;
+    it->second->entry.timestamp = get_current_time_ns();
+    it->second->entry.access_count++;
+    ++hits_;
+    return true;
+}
 
-    std::vector<VocabularyEntry> parse_token_array(std::istream& file, void* value) {
-        std::vector<VocabularyEntry> result;
-        if (!value) return result;
-
-        auto* array_data = static_cast<std::vector<uint8_t>*>(value);
-        if (array_data->size() < 12) return result;
-
-        const uint8_t* data = array_data->data();
-        GGUFValueType elem_type = static_cast<GGUFValueType>(*reinterpret_cast<const uint32_t*>(data));
-        uint64_t count = *reinterpret_cast<const uint64_t*>(data + 4);
-
-        if (elem_type != GGUFValueType::STRING) return result;
-
-        result.reserve(count);
-        size_t offset = 12;
-
-        for (uint64_t i = 0; i < count && offset < array_data->size(); ++i) {
-            if (offset + 8 > array_data->size()) break;
-
-            uint64_t str_len = *reinterpret_cast<const uint64_t*>(data + offset);
-            offset += 8;
-
-            if (offset + str_len > array_data->size()) break;
-
-            VocabularyEntry entry;
-            entry.token.assign(reinterpret_cast<const char*>(data + offset), str_len);
-            entry.bytes.assign(data + offset, data + offset + str_len);
-            entry.score = 0.0f;
-            entry.token_type = 0;
-
-            result.push_back(std::move(entry));
-            offset += str_len;
-        }
-
-        return result;
+void TensorLRUCache::put(const std::string& tensor_name, const std::vector<float>& data,
+                         const GGUFTensorInfo& info) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    
+    size_t memory_cost = data.size() * sizeof(float);
+    
+    auto it = cache_map_.find(tensor_name);
+    if (it != cache_map_.end()) {
+        // Update existing entry
+        current_memory_ -= it->second->entry.memory_cost;
+        it->second->entry.data = data;
+        it->second->entry.memory_cost = memory_cost;
+        it->second->entry.timestamp = get_current_time_ns();
+        it->second->entry.tensor_info = info;
+        current_memory_ += memory_cost;
+        cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
+        return;
     }
-
-    void parse_scores(const void* value, std::vector<VocabularyEntry>& vocab) {
-        if (!value || vocab.empty()) return;
-
-        auto* array_data = static_cast<const std::vector<uint8_t>*>(value);
-        const uint8_t* data = array_data->data();
-        if (array_data->size() < 12) return;
-
-        GGUFValueType elem_type = static_cast<GGUFValueType>(*reinterpret_cast<const uint32_t*>(data));
-        uint64_t count = *reinterpret_cast<const uint64_t*>(data + 4);
-
-        if (elem_type != GGUFValueType::FLOAT32) return;
-
-        size_t offset = 12;
-        for (uint64_t i = 0; i < count && i < vocab.size() && offset + 4 <= array_data->size(); ++i) {
-            vocab[i].score = *reinterpret_cast<const float*>(data + offset);
-            offset += 4;
-        }
+    
+    // Evict oldest if at capacity
+    while (should_evict(memory_cost)) {
+        if (cache_list_.empty()) break;
+        evict_oldest();
     }
+    
+    // Insert new entry
+    CacheNode node;
+    node.key = tensor_name;
+    node.entry.data = data;
+    node.entry.memory_cost = memory_cost;
+    node.entry.timestamp = get_current_time_ns();
+    node.entry.access_count = 0;
+    node.entry.tensor_info = info;
+    
+    cache_list_.push_front(std::move(node));
+    cache_map_[tensor_name] = cache_list_.begin();
+    current_memory_ += memory_cost;
+}
 
-    void parse_token_types(const void* value, std::vector<VocabularyEntry>& vocab) {
-        if (!value || vocab.empty()) return;
+bool TensorLRUCache::contains(const std::string& tensor_name) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return cache_map_.find(tensor_name) != cache_map_.end();
+}
 
-        auto* array_data = static_cast<const std::vector<uint8_t>*>(value);
-        const uint8_t* data = array_data->data();
-        if (array_data->size() < 12) return;
+void TensorLRUCache::clear() {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    cache_map_.clear();
+    cache_list_.clear();
+    current_memory_ = 0;
+}
 
-        GGUFValueType elem_type = static_cast<GGUFValueType>(*reinterpret_cast<const uint32_t*>(data));
-        uint64_t count = *reinterpret_cast<const uint64_t*>(data + 4);
+TensorLRUCache::Stats TensorLRUCache::get_stats() const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    Stats stats;
+    stats.hits = hits_;
+    stats.misses = misses_;
+    stats.evictions = evictions_;
+    stats.current_entries = cache_list_.size();
+    stats.current_memory_bytes = current_memory_;
+    return stats;
+}
 
-        if (elem_type != GGUFValueType::UINT32) return;
-
-        size_t offset = 12;
-        for (uint64_t i = 0; i < count && i < vocab.size() && offset + 4 <= array_data->size(); ++i) {
-            vocab[i].token_type = *reinterpret_cast<const uint32_t*>(data + offset);
-            offset += 4;
-        }
-    }
-
-    std::vector<BPEMerge> parse_merges(std::istream& file, void* value) {
-        std::vector<BPEMerge> result;
-        if (!value) return result;
-
-        auto* array_data = static_cast<std::vector<uint8_t>*>(value);
-        if (array_data->size() < 12) return result;
-
-        const uint8_t* data = array_data->data();
-        GGUFValueType elem_type = static_cast<GGUFValueType>(*reinterpret_cast<const uint32_t*>(data));
-        uint64_t count = *reinterpret_cast<const uint64_t*>(data + 4);
-
-        if (elem_type != GGUFValueType::STRING) return result;
-
-        result.reserve(count);
-        size_t offset = 12;
-
-        for (uint64_t i = 0; i < count && offset < array_data->size(); ++i) {
-            if (offset + 8 > array_data->size()) break;
-
-            uint64_t str_len = *reinterpret_cast<const uint64_t*>(data + offset);
-            offset += 8;
-
-            if (offset + str_len > array_data->size()) break;
-
-            std::string merge_str(reinterpret_cast<const char*>(data + offset), str_len);
-            offset += str_len;
-
-            // Parse "first second" format
-            size_t space_pos = merge_str.find(' ');
-            if (space_pos != std::string::npos) {
-                BPEMerge merge;
-                merge.first = merge_str.substr(0, space_pos);
-                merge.second = merge_str.substr(space_pos + 1);
-                merge.rank = static_cast<uint32_t>(i);
-                result.push_back(merge);
-            }
-        }
-
-        merges_ = result;
-        return result;
-    }
-
-    void parse_added_tokens(std::istream& file, void* value, std::vector<VocabularyEntry>& vocab) {
-        // Parse added tokens that extend the base vocabulary
-        (void)file;
-        (void)value;
-        (void)vocab;
-        // Implementation for added tokens parsing
-    }
-};
-
-// ============================================================================
-// Tensor Type Size Lookup with Quantization Support
-// ============================================================================
-static uint64_t get_type_size(GGUFValueType type) {
-    switch (type) {
-        case GGUFValueType::UINT8:
-        case GGUFValueType::INT8:
-            return 1;
-        case GGUFValueType::UINT16:
-        case GGUFValueType::INT16:
-        case GGUFValueType::FLOAT16:
-        case GGUFValueType::BFLOAT16:
-            return 2;
-        case GGUFValueType::UINT32:
-        case GGUFValueType::INT32:
-        case GGUFValueType::FLOAT32:
-            return 4;
-        case GGUFValueType::UINT64:
-        case GGUFValueType::INT64:
-        case GGUFValueType::FLOAT64:
-            return 8;
-        case GGUFValueType::Q4_0:
-        case GGUFValueType::Q4_1:
-            return 18;
-        case GGUFValueType::Q5_0:
-        case GGUFValueType::Q5_1:
-            return 22;
-        case GGUFValueType::Q8_0:
-        case GGUFValueType::Q8_1:
-            return 34;
-        default:
-            return 4;
+void TensorLRUCache::touch(const std::string& tensor_name) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = cache_map_.find(tensor_name);
+    if (it != cache_map_.end()) {
+        cache_list_.splice(cache_list_.begin(), cache_list_, it->second);
+        it->second->entry.timestamp = get_current_time_ns();
     }
 }
 
-static uint64_t calculate_tensor_size(const GGUFTensorInfo& tensor) {
-    uint64_t element_count = 1;
-    for (uint64_t dim : tensor.dimensions) {
-        element_count *= dim;
+size_t TensorLRUCache::remove_expired() {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    if (config_.ttl_seconds == 0) return 0;
+    
+    size_t removed = 0;
+    uint64_t now = get_current_time_ns();
+    auto it = cache_list_.begin();
+    while (it != cache_list_.end()) {
+        uint64_t age_sec = (now - it->entry.timestamp) / 1000000000ULL;
+        if (age_sec > config_.ttl_seconds) {
+            current_memory_ -= it->entry.memory_cost;
+            cache_map_.erase(it->key);
+            it = cache_list_.erase(it);
+            ++removed;
+        } else {
+            ++it;
+        }
     }
+    return removed;
+}
 
-    uint64_t type_size = get_type_size(tensor.data_type);
+void TensorLRUCache::evict_oldest() {
+    if (cache_list_.empty()) return;
+    auto oldest = std::prev(cache_list_.end());
+    current_memory_ -= oldest->entry.memory_cost;
+    cache_map_.erase(oldest->key);
+    cache_list_.erase(oldest);
+    ++evictions_;
+}
 
-    if (tensor.data_type >= GGUFValueType::Q4_0 && tensor.data_type <= GGUFValueType::Q8_1) {
-        const uint64_t block_size = 32;
-        uint64_t num_blocks = (element_count + block_size - 1) / block_size;
-        return num_blocks * type_size;
-    }
-
-    return element_count * type_size;
+bool TensorLRUCache::should_evict(size_t new_memory) const {
+    if (config_.max_entries > 0 && cache_list_.size() >= config_.max_entries) return true;
+    if (config_.max_memory_bytes > 0 && current_memory_ + new_memory > config_.max_memory_bytes) return true;
+    return false;
 }
 
 // ============================================================================
-// Multi-Shard Streaming Tensor Reader with Parallel I/O
+// StreamingTensorReader Implementation
 // ============================================================================
-class StreamingTensorReader {
-public:
-    struct ShardInfo {
-        std::filesystem::path path;
-        uint64_t tensor_start;
-        uint64_t tensor_count;
-        uint64_t data_offset;
-    };
+StreamingTensorReader::StreamingTensorReader(const Path& file_path,
+                                              WorkStealingThreadPool* thread_pool)
+    : file_path_(file_path), thread_pool_(thread_pool) {
+    file_.open(file_path_.string(), std::ios::binary | std::ios::in);
+}
 
-    explicit StreamingTensorReader(const std::filesystem::path& primary_path)
-        : primary_path_(primary_path) {}
-
-    ~StreamingTensorReader() {
-        close();
+StreamingTensorReader::~StreamingTensorReader() {
+    if (file_.is_open()) {
+        file_.close();
     }
+}
 
-    bool open() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Open primary file
-        files_[primary_path_] = std::make_unique<std::ifstream>();
-        files_[primary_path_]->open(primary_path_, std::ios::binary | std::ios::in);
-        return files_[primary_path_]->is_open();
-    }
-
-    void close() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& [path, file] : files_) {
-            if (file && file->is_open()) {
-                file->close();
-            }
-        }
-        files_.clear();
-    }
-
-    bool add_shard(const std::filesystem::path& shard_path, uint64_t tensor_start, uint64_t tensor_count) {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        ShardInfo info;
-        info.path = shard_path;
-        info.tensor_start = tensor_start;
-        info.tensor_count = tensor_count;
-
-        // Open shard file
-        auto file = std::make_unique<std::ifstream>();
-        file->open(shard_path, std::ios::binary | std::ios::in);
-        if (!file->is_open()) {
-            return false;
-        }
-
-        // Read data offset from shard header
-        file->seekg(4);  // Skip magic
-        uint32_t version;
-        file->read(reinterpret_cast<char*>(&version), 4);
-        uint64_t tensor_count_in_shard, metadata_kv_count;
-        file->read(reinterpret_cast<char*>(&tensor_count_in_shard), 8);
-        file->read(reinterpret_cast<char*>(&metadata_kv_count), 8);
-
-        // Skip metadata and tensor info to find data offset
-        // Simplified - would need full header parsing
-        info.data_offset = 4096;  // Default alignment
-
-        files_[shard_path] = std::move(file);
-        shards_.push_back(info);
-        return true;
-    }
-
-    // Thread-safe chunk read
-    bool read_chunk(uint64_t offset, void* buffer, size_t size, const std::filesystem::path& path = "") {
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        const auto& file_path = path.empty() ? primary_path_ : path;
-        auto it = files_.find(file_path);
-        if (it == files_.end() || !it->second || !it->second->is_open()) {
-            return false;
-        }
-
-        it->second->seekg(static_cast<std::streamoff>(offset));
-        if (!it->second->good()) return false;
-
-        it->second->read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
-        return it->second->good() || it->second->gcount() == static_cast<std::streamsize>(size);
-    }
-
-    // Async read with work-stealing thread pool
-    std::future<bool> read_chunk_async(WorkStealingThreadPool& pool, uint64_t offset, void* buffer, size_t size) {
-        return pool.enqueue([this, offset, buffer, size]() {
-            return read_chunk(offset, buffer, size);
-        });
-    }
-
-    // Parallel read with optimal chunk sizing for 70B models
-    bool read_parallel(WorkStealingThreadPool& pool, uint64_t offset, void* buffer, size_t total_size,
-                       size_t chunk_size = 8 * 1024 * 1024) {  // 8MB chunks for large models
-        if (total_size <= chunk_size) {
-            return read_chunk(offset, buffer, total_size);
-        }
-
-        char* byte_buffer = static_cast<char*>(buffer);
-        size_t num_chunks = (total_size + chunk_size - 1) / chunk_size;
-        std::vector<std::future<bool>> futures;
-        futures.reserve(num_chunks);
-
-        // Submit all chunk reads to thread pool
-        for (size_t i = 0; i < num_chunks; ++i) {
-            size_t current_offset = i * chunk_size;
-            size_t current_size = std::min(chunk_size, total_size - current_offset);
-
-            futures.push_back(
-                pool.enqueue([this, offset, byte_buffer, current_offset, current_size]() {
-                    return read_chunk(offset + current_offset, byte_buffer + current_offset, current_size);
-                })
-            );
-        }
-
-        // Wait for all chunks and check success
-        bool success = true;
-        for (auto& f : futures) {
-            success = success && f.get();
-        }
-
-        return success;
-    }
-
-    // Multi-shard parallel read for sharded models
-    bool read_multi_shard(WorkStealingThreadPool& pool, const std::vector<std::pair<uint64_t, size_t>>& shard_ranges,
-                          void* buffer, size_t chunk_size = 8 * 1024 * 1024) {
-        char* byte_buffer = static_cast<char*>(buffer);
-        std::vector<std::future<bool>> futures;
-
-        size_t buffer_offset = 0;
-        for (const auto& [file_offset, size] : shard_ranges) {
-            futures.push_back(
-                pool.enqueue([this, file_offset, byte_buffer, buffer_offset, size, chunk_size, &pool]() {
-                    return read_parallel(pool, file_offset, byte_buffer + buffer_offset, size, chunk_size);
-                })
-            );
-            buffer_offset += size;
-        }
-
-        bool success = true;
-        for (auto& f : futures) {
-            success = success && f.get();
-        }
-
-        return success;
-    }
-
-private:
-    std::filesystem::path primary_path_;
-    std::unordered_map<std::filesystem::path, std::unique_ptr<std::ifstream>> files_;
-    std::vector<ShardInfo> shards_;
-    mutable std::mutex mutex_;
-};
-
-// ============================================================================
-// Intelligent Tensor Pack Mapper with Layer-Aware Grouping
-// ============================================================================
-class TensorPackMapper {
-public:
-    struct PackMapping {
-        uint64_t pack_id;
-        std::string tensor_name;
-        uint64_t file_offset;
-        uint64_t compressed_size;
-        uint64_t decompressed_size;
-        GGUFValueType data_type;
-        std::vector<uint64_t> dimensions;
-        uint32_t layer_idx;
-        PackType pack_type;
-        float importance_score;
-    };
-
-    struct LayerGroup {
-        uint32_t layer_idx;
-        std::vector<PackMapping> attention_packs;
-        std::vector<PackMapping> ffn_packs;
-        std::vector<PackMapping> norm_packs;
-        std::vector<PackMapping> other_packs;
-        uint64_t total_size;
-    };
-
-    std::vector<PackMapping> create_mappings(
-        const std::vector<GGUFTensorInfo>& tensors,
-        const ModelConfig& config) {
-
-        std::vector<PackMapping> mappings;
-        mappings.reserve(tensors.size());
-        uint64_t next_pack_id = 0;
-
-        // Group tensors by layer
-        std::unordered_map<uint32_t, std::vector<const GGUFTensorInfo*>> layer_tensors;
-        std::vector<const GGUFTensorInfo*> non_layer_tensors;
-
-        for (const auto& tensor : tensors) {
-            uint32_t layer_idx = extract_layer_index(tensor.name);
-            if (layer_idx > 0) {
-                layer_tensors[layer_idx].push_back(&tensor);
-            } else {
-                non_layer_tensors.push_back(&tensor);
-            }
-        }
-
-        // Create mappings for layer tensors (sorted by layer)
-        std::vector<uint32_t> sorted_layers;
-        for (const auto& [layer_idx, _] : layer_tensors) {
-            sorted_layers.push_back(layer_idx);
-        }
-        std::sort(sorted_layers.begin(), sorted_layers.end());
-
-        for (uint32_t layer_idx : sorted_layers) {
-            for (const auto* tensor : layer_tensors[layer_idx]) {
-                PackMapping mapping = create_mapping(*tensor, next_pack_id++, layer_idx, config);
-                mappings.push_back(mapping);
-            }
-        }
-
-        // Create mappings for non-layer tensors (embeddings, output, etc.)
-        for (const auto* tensor : non_layer_tensors) {
-            PackMapping mapping = create_mapping(*tensor, next_pack_id++, 0, config);
-            mappings.push_back(mapping);
-        }
-
-        return mappings;
-    }
-
-    std::vector<LayerGroup> create_layer_groups(const std::vector<PackMapping>& mappings) {
-        std::unordered_map<uint32_t, LayerGroup> groups;
-
-        for (const auto& mapping : mappings) {
-            if (mapping.layer_idx == 0) continue;  // Skip non-layer tensors
-
-            if (groups.find(mapping.layer_idx) == groups.end()) {
-                groups[mapping.layer_idx] = LayerGroup{};
-                groups[mapping.layer_idx].layer_idx = mapping.layer_idx;
-            }
-
-            auto& group = groups[mapping.layer_idx];
-            group.total_size += mapping.decompressed_size;
-
-            switch (mapping.pack_type) {
-                case PackType::ATTENTION_Q:
-                case PackType::ATTENTION_K:
-                case PackType::ATTENTION_V:
-                case PackType::ATTENTION_O:
-                    group.attention_packs.push_back(mapping);
-                    break;
-                case PackType::FEED_FORWARD_UP:
-                case PackType::FEED_FORWARD_DOWN:
-                case PackType::FEED_FORWARD_GATE:
-                    group.ffn_packs.push_back(mapping);
-                    break;
-                case PackType::NORM_GAMMA:
-                case PackType::NORM_BETA:
-                    group.norm_packs.push_back(mapping);
-                    break;
-                default:
-                    group.other_packs.push_back(mapping);
-                    break;
-            }
-        }
-
-        std::vector<LayerGroup> result;
-        for (auto& [idx, group] : groups) {
-            result.push_back(std::move(group));
-        }
-        std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-            return a.layer_idx < b.layer_idx;
-        });
-
-        return result;
-    }
-
-private:
-    PackMapping create_mapping(const GGUFTensorInfo& tensor, uint64_t pack_id, uint32_t layer_idx, const ModelConfig& config) {
-        PackMapping mapping;
-        mapping.pack_id = pack_id;
-        mapping.tensor_name = tensor.name;
-        mapping.file_offset = tensor.offset;
-        mapping.data_type = tensor.data_type;
-        mapping.dimensions = tensor.dimensions;
-        mapping.layer_idx = layer_idx;
-        mapping.pack_type = infer_pack_type(tensor.name);
-
-        mapping.decompressed_size = calculate_tensor_size(tensor);
-        mapping.compressed_size = mapping.decompressed_size;
-
-        // Calculate importance score based on layer and type
-        float layer_factor = 1.0f - (static_cast<float>(layer_idx) / std::max(1u, config.num_layers));
-        float type_factor = calculate_type_importance(mapping.pack_type);
-        mapping.importance_score = layer_factor * type_factor;
-
-        return mapping;
-    }
-
-    uint32_t extract_layer_index(const std::string& tensor_name) {
-        // Support various naming conventions
-        const char* patterns[] = {"layers.", "blk.", "layer_", "encoder.layer."};
-        for (const char* pattern : patterns) {
-            size_t pos = tensor_name.find(pattern);
-            if (pos != std::string::npos) {
-                size_t start = pos + strlen(pattern);
-                size_t end = tensor_name.find_first_of("._", start);
-                if (end == std::string::npos) end = tensor_name.length();
-
-                try {
-                    return static_cast<uint32_t>(std::stoul(tensor_name.substr(start, end - start)));
-                } catch (...) {
-                    continue;
-                }
-            }
-        }
-        return 0;
-    }
-
-    PackType infer_pack_type(const std::string& tensor_name) {
-        // Attention weights
-        if (tensor_name.find("attention.wq") != std::string::npos ||
-            tensor_name.find("attn_q") != std::string::npos ||
-            tensor_name.find("self_attn.q_proj") != std::string::npos) return PackType::ATTENTION_Q;
-
-        if (tensor_name.find("attention.wk") != std::string::npos ||
-            tensor_name.find("attn_k") != std::string::npos ||
-            tensor_name.find("self_attn.k_proj") != std::string::npos) return PackType::ATTENTION_K;
-
-        if (tensor_name.find("attention.wv") != std::string::npos ||
-            tensor_name.find("attn_v") != std::string::npos ||
-            tensor_name.find("self_attn.v_proj") != std::string::npos) return PackType::ATTENTION_V;
-
-        if (tensor_name.find("attention.wo") != std::string::npos ||
-            tensor_name.find("attn_output") != std::string::npos ||
-            tensor_name.find("self_attn.o_proj") != std::string::npos) return PackType::ATTENTION_O;
-
-        // Feed-forward weights
-        if (tensor_name.find("feed_forward.w1") != std::string::npos ||
-            tensor_name.find("ffn_gate") != std::string::npos ||
-            tensor_name.find("mlp.gate_proj") != std::string::npos) return PackType::FEED_FORWARD_GATE;
-
-        if (tensor_name.find("feed_forward.w2") != std::string::npos ||
-            tensor_name.find("ffn_down") != std::string::npos ||
-            tensor_name.find("mlp.down_proj") != std::string::npos) return PackType::FEED_FORWARD_DOWN;
-
-        if (tensor_name.find("feed_forward.w3") != std::string::npos ||
-            tensor_name.find("ffn_up") != std::string::npos ||
-            tensor_name.find("mlp.up_proj") != std::string::npos) return PackType::FEED_FORWARD_UP;
-
-        // Normalization
-        if (tensor_name.find("attention_norm") != std::string::npos ||
-            tensor_name.find("input_layernorm") != std::string::npos) return PackType::NORM_GAMMA;
-
-        if (tensor_name.find("ffn_norm") != std::string::npos ||
-            tensor_name.find("post_attention_layernorm") != std::string::npos) return PackType::NORM_GAMMA;
-
-        // Embeddings and output
-        if (tensor_name.find("token_embd") != std::string::npos ||
-            tensor_name.find("embed_tokens") != std::string::npos ||
-            tensor_name.find("word_embeddings") != std::string::npos) return PackType::EMBEDDING;
-
-        if (tensor_name.find("output_norm") != std::string::npos ||
-            tensor_name.find("norm") != std::string::npos) return PackType::NORM_GAMMA;
-
-        if (tensor_name.find("output") != std::string::npos ||
-            tensor_name.find("lm_head") != std::string::npos) return PackType::HEAD;
-
-        // RoPE
-        if (tensor_name.find("rope") != std::string::npos ||
-            tensor_name.find("rotary") != std::string::npos) return PackType::ROPE;
-
-        return PackType::UNKNOWN;
-    }
-
-    float calculate_type_importance(PackType type) {
-        switch (type) {
-            case PackType::ATTENTION_Q:
-            case PackType::ATTENTION_K:
-            case PackType::ATTENTION_V:
-                return 1.0f;
-            case PackType::ATTENTION_O:
-                return 0.95f;
-            case PackType::NORM_GAMMA:
-            case PackType::NORM_BETA:
-                return 0.9f;
-            case PackType::FEED_FORWARD_GATE:
-            case PackType::FEED_FORWARD_UP:
-                return 0.85f;
-            case PackType::FEED_FORWARD_DOWN:
-                return 0.8f;
-            case PackType::EMBEDDING:
-                return 0.75f;
-            case PackType::HEAD:
-                return 0.7f;
-            case PackType::ROPE:
-                return 0.6f;
-            default:
-                return 0.5f;
+Expected<std::vector<float>> StreamingTensorReader::read_tensor(const GGUFTensorInfo& tensor_info) {
+    std::vector<uint8_t> raw_data(tensor_info.data_size);
+    {
+        std::lock_guard<std::mutex> lock(file_mutex_);
+        file_.seekg(tensor_info.data_offset);
+        file_.read(reinterpret_cast<char*>(raw_data.data()), tensor_info.data_size);
+        if (!file_) {
+            return -1;  // Error code
         }
     }
-};
-
-// ============================================================================
-// Advanced Hybrid Decompression Engine with Auto-Codec Detection
-// ============================================================================
-class HybridDecompressor {
-public:
-    enum class CompressionFormat {
-        RAW,
-        BLOSC2_LZ4,
-        BLOSC2_ZSTD,
-        ZFP,
-        HYBRID_VKS,
-        UNKNOWN
-    };
-
-    struct CompressionHeader {
-        CompressionFormat format;
-        uint64_t uncompressed_size;
-        uint64_t compressed_size;
-        GGUFValueType data_type;
-        uint32_t checksum;
-    };
-
-    HybridDecompressor() {
-        compression::Blosc2Compression::initialize();
+    
+    // Decompress if needed
+    if (tensor_info.is_compressed) {
+        return decompress_data(raw_data, tensor_info);
     }
-
-    ~HybridDecompressor() = default;
-
-    CompressionHeader detect_format(const std::vector<uint8_t>& data) {
-        CompressionHeader header;
-        header.format = CompressionFormat::RAW;
-        header.compressed_size = data.size();
-
-        if (data.size() < 16) {
-            return header;
-        }
-
-        // Check for Blosc2 header
-        if (data[0] == 0x02 && data[1] == 0x01) {
-            header.format = CompressionFormat::BLOSC2_LZ4;
-            // Parse Blosc2 header for uncompressed size
-            if (data.size() >= 16) {
-                header.uncompressed_size = *reinterpret_cast<const uint64_t*>(&data[8]);
-            }
-            return header;
-        }
-
-        // Check for ZFP header
-        if (data[0] == 'Z' && data[1] == 'F' && data[2] == 'P') {
-            header.format = CompressionFormat::ZFP;
-            if (data.size() >= 16) {
-                header.uncompressed_size = *reinterpret_cast<const uint64_t*>(&data[4]);
-            }
-            return header;
-        }
-
-        // Check for VKS (Vulkan Symbiote) hybrid compression header
-        if (data[0] == 'V' && data[1] == 'K' && data[2] == 'S') {
-            header.format = CompressionFormat::HYBRID_VKS;
-            if (data.size() >= 24) {
-                header.uncompressed_size = *reinterpret_cast<const uint64_t*>(&data[4]);
-                header.compressed_size = *reinterpret_cast<const uint64_t*>(&data[12]);
-                header.checksum = *reinterpret_cast<const uint32_t*>(&data[20]);
-            }
-            return header;
-        }
-
-        // Check for ZSTD magic
-        if (data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD) {
-            header.format = CompressionFormat::BLOSC2_ZSTD;
-            return header;
-        }
-
-        return header;
+    
+    // Dequantize if needed
+    if (tensor_info.data_type >= GGUFValueType::Q4_0 && 
+        tensor_info.data_type <= GGUFValueType::IQ4_XS_3) {
+        return dequantize_data(raw_data, tensor_info);
     }
+    
+    // Raw float data
+    std::vector<float> result;
+    result.resize(raw_data.size() / sizeof(float));
+    std::memcpy(result.data(), raw_data.data(), raw_data.size());
+    
+    return result;
+}
 
-    std::vector<float> decompress(const std::vector<uint8_t>& compressed_data,
-                                   uint64_t expected_elements,
-                                   GGUFValueType data_type) {
-        auto header = detect_format(compressed_data);
-
-        switch (header.format) {
-            case CompressionFormat::BLOSC2_LZ4:
-            case CompressionFormat::BLOSC2_ZSTD:
-                return decompress_blosc2(compressed_data, expected_elements);
-
-            case CompressionFormat::ZFP:
-                return decompress_zfp(compressed_data, expected_elements);
-
-            case CompressionFormat::HYBRID_VKS:
-                return decompress_hybrid_vks(compressed_data, expected_elements, data_type);
-
-            case CompressionFormat::RAW:
-            default:
-                return convert_raw_to_fp32(compressed_data, data_type, expected_elements);
+std::vector<Expected<std::vector<float>>> StreamingTensorReader::read_tensors_parallel(
+    const std::vector<GGUFTensorInfo>& tensors) {
+    
+    std::vector<Expected<std::vector<float>>> results(tensors.size());
+    
+    if (!thread_pool_) {
+        // Fallback to sequential
+        for (size_t i = 0; i < tensors.size(); ++i) {
+            results[i] = read_tensor(tensors[i]);
         }
-    }
-
-    // Batch decompression for multiple tensors
-    std::vector<std::vector<float>> decompress_batch(
-        const std::vector<std::pair<std::vector<uint8_t>, uint64_t>>& compressed_batches,
-        GGUFValueType data_type,
-        WorkStealingThreadPool& pool) {
-
-        std::vector<std::future<std::vector<float>>> futures;
-        futures.reserve(compressed_batches.size());
-
-        for (const auto& [data, elements] : compressed_batches) {
-            futures.push_back(pool.enqueue([this, &data, elements, data_type]() {
-                return decompress(data, elements, data_type);
-            }));
-        }
-
-        std::vector<std::vector<float>> results;
-        results.reserve(futures.size());
-        for (auto& f : futures) {
-            results.push_back(f.get());
-        }
-
         return results;
     }
-
-private:
-    std::vector<float> decompress_blosc2(const std::vector<uint8_t>& compressed_data,
-                                          uint64_t expected_elements) {
-        std::vector<float> result(expected_elements);
-
-        compression::Blosc2Compression decompressor;
-        bool success = decompressor.decompress(
-            compressed_data.data(),
-            compressed_data.size(),
-            expected_elements * sizeof(float),
-            result.data()
-        );
-
-        if (!success) {
-            result.clear();
-        }
-
-        return result;
+    
+    // Submit all tasks
+    std::vector<std::future<void>> futures;
+    futures.reserve(tensors.size());
+    
+    for (size_t i = 0; i < tensors.size(); ++i) {
+        futures.push_back(thread_pool_->enqueue([this, &tensors, &results, i]() {
+            results[i] = read_tensor(tensors[i]);
+        }));
     }
-
-    std::vector<float> decompress_zfp(const std::vector<uint8_t>& compressed_data,
-                                       uint64_t expected_elements) {
-        // ZFP decompression stub - would integrate with zfp library
-        (void)compressed_data;
-        (void)expected_elements;
-        return {};
+    
+    // Wait for all to complete
+    for (auto& f : futures) {
+        f.wait();
     }
+    
+    return results;
+}
 
-    std::vector<float> decompress_hybrid_vks(const std::vector<uint8_t>& compressed_data,
-                                              uint64_t expected_elements,
-                                              GGUFValueType data_type) {
-        if (compressed_data.size() < 24) return {};
-
-        // Verify checksum
-        uint32_t stored_checksum = *reinterpret_cast<const uint32_t*>(&compressed_data[20]);
-        uint32_t computed_checksum = crc32(compressed_data.data() + 24, compressed_data.size() - 24);
-
-        if (stored_checksum != computed_checksum) {
-            std::cerr << "[HybridDecompressor] CRC32 mismatch!" << std::endl;
-            return {};
+Expected<std::vector<float>> StreamingTensorReader::read_tensor_hybrid(
+    const GGUFTensorInfo& tensor_info) {
+    
+    if (!tensor_info.is_compressed) {
+        return read_tensor(tensor_info);
+    }
+    
+    // Read compressed data
+    std::vector<uint8_t> compressed_data(tensor_info.data_size);
+    {
+        std::lock_guard<std::mutex> lock(file_mutex_);
+        file_.seekg(tensor_info.data_offset);
+        file_.read(reinterpret_cast<char*>(compressed_data.data()), tensor_info.data_size);
+        if (!file_) {
+            return -1;
         }
+    }
+    
+    return decompress_data(compressed_data, tensor_info);
+}
 
-        // Decompress based on data type
-        if (is_quantized_type(data_type)) {
-            return decompress_quantized(compressed_data.data() + 24, compressed_data.size() - 24,
-                                        data_type, expected_elements);
+void StreamingTensorReader::read_tensor_async(const ReadRequest& request,
+                                               std::function<void(ReadResult)> callback) {
+    auto task = [this, request, callback]() {
+        auto start = std::chrono::high_resolution_clock::now();
+        ReadResult result;
+        result.tensor_name = request.tensor_name;
+        
+        // Build temporary tensor info
+        GGUFTensorInfo info;
+        info.name = request.tensor_name;
+        info.data_offset = request.file_offset;
+        info.data_size = request.size;
+        info.data_type = request.data_type;
+        info.dimensions = request.dimensions;
+        info.is_compressed = request.decompress;
+        
+        auto read_result = read_tensor(info);
+        if (read_result.has_value()) {
+            result.data = std::move(read_result.value());
+            result.success = true;
         } else {
-            return decompress_blosc2(compressed_data, expected_elements);
+            result.success = false;
+            result.error_msg = "Read failed";
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        result.read_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        
+        if (callback) callback(result);
+    };
+    
+    if (thread_pool_) {
+        thread_pool_->enqueue(task);
+    } else {
+        std::thread(task).detach();
     }
+}
 
-    std::vector<float> decompress_quantized(const uint8_t* data, size_t size,
-                                            GGUFValueType data_type, uint64_t expected_elements) {
-        std::vector<float> result;
-        result.reserve(expected_elements);
-
-        switch (data_type) {
-            case GGUFValueType::Q8_0:
-                result = decompress_q8_0(data, size, expected_elements);
-                break;
-            case GGUFValueType::Q4_0:
-                result = decompress_q4_0(data, size, expected_elements);
-                break;
-            case GGUFValueType::Q5_0:
-            case GGUFValueType::Q5_1:
-                result = decompress_q5(data, size, expected_elements, data_type);
-                break;
-            default:
-                break;
-        }
-
-        return result;
-    }
-
-    std::vector<float> decompress_q8_0(const uint8_t* data, size_t size, uint64_t element_count) {
-        const uint64_t block_size = 32;
-        uint64_t num_blocks = (element_count + block_size - 1) / block_size;
-        std::vector<float> result;
-        result.reserve(element_count);
-
-        size_t offset = 0;
-        for (uint64_t block = 0; block < num_blocks && offset + block_size + 4 <= size; ++block) {
-            float scale = *reinterpret_cast<const float*>(data + offset);
-            offset += 4;
-
-            for (uint32_t i = 0; i < block_size && result.size() < element_count && offset < size; ++i) {
-                int8_t quantized = static_cast<int8_t>(data[offset++]);
-                result.push_back(scale * static_cast<float>(quantized));
+void StreamingTensorReader::read_tensors_async_batch(
+    const std::vector<ReadRequest>& requests,
+    std::function<void(std::vector<ReadResult>)> batch_callback) {
+    
+    std::vector<ReadResult> results(requests.size());
+    std::atomic<size_t> completed(0);
+    
+    for (size_t i = 0; i < requests.size(); ++i) {
+        read_tensor_async(requests[i], [&, i](ReadResult result) {
+            results[i] = std::move(result);
+            if (++completed == requests.size()) {
+                if (batch_callback) batch_callback(results);
             }
-        }
-
-        return result;
+        });
     }
+}
 
-    std::vector<float> decompress_q4_0(const uint8_t* data, size_t size, uint64_t element_count) {
-        const uint64_t block_size = 32;
-        uint64_t num_blocks = (element_count + block_size - 1) / block_size;
-        std::vector<float> result;
-        result.reserve(element_count);
-
-        size_t offset = 0;
-        for (uint64_t block = 0; block < num_blocks && offset + block_size / 2 + 4 <= size; ++block) {
-            float scale = *reinterpret_cast<const float*>(data + offset);
-            offset += 4;
-
-            for (uint32_t i = 0; i < block_size / 2 && result.size() < element_count; ++i) {
-                if (offset >= size) break;
-
-                uint8_t packed = data[offset++];
-                int8_t q0 = (packed >> 4) & 0x0F;
-                int8_t q1 = packed & 0x0F;
-
-                result.push_back(scale * static_cast<float>(q0 - 8));
-                if (result.size() < element_count) {
-                    result.push_back(scale * static_cast<float>(q1 - 8));
+Expected<std::vector<float>> StreamingTensorReader::decompress_data(
+    const std::vector<uint8_t>& compressed_data, const GGUFTensorInfo& info) {
+    
+    switch (info.compression_codec) {
+        case 1: {  // Blosc2
+            compression::Blosc2Compression blosc;
+            size_t decompressed_size = info.dimensions.empty() ? compressed_data.size() : 
+                info.dimensions[0] * sizeof(float);
+            std::vector<float> float_data(decompressed_size / sizeof(float));
+            if (!blosc.decompress(compressed_data.data(), compressed_data.size(), 
+                                  decompressed_size, float_data.data())) {
+                return -2;
+            }
+            return float_data;
+        }
+        case 2: {  // ZFP
+            // Determine dimensionality from tensor info
+            uint32_t dims = static_cast<uint32_t>(info.dimensions.size());
+            if (dims == 0) return -3;
+            
+            size_t total_elements = 1;
+            for (auto d : info.dimensions) total_elements *= d;
+            
+            compression::ZFPParams params = compression::ZFPParams::rate_mode(16.0);
+            
+            compression::ZFPCompression zfp(params);
+            std::vector<float> output(total_elements);
+            
+            if (dims == 1) {
+                if (!zfp.decompress_1d(compressed_data.data(), compressed_data.size(), 
+                                       output.data(), info.dimensions[0])) {
+                    return -4;
                 }
+            } else if (dims == 2) {
+                if (!zfp.decompress_2d(compressed_data.data(), compressed_data.size(), 
+                                       output.data(), info.dimensions[0], info.dimensions[1])) {
+                    return -4;
+                }
+            } else if (dims == 3) {
+                if (!zfp.decompress_3d(compressed_data.data(), compressed_data.size(), 
+                                       output.data(), info.dimensions[0], info.dimensions[1], info.dimensions[2])) {
+                    return -4;
+                }
+            } else {
+                return -5;  // Unsupported dimensionality
             }
+            
+            return output;
         }
-
-        return result;
-    }
-
-    std::vector<float> decompress_q5(const uint8_t* data, size_t size, uint64_t element_count, GGUFValueType type) {
-        const uint64_t block_size = 32;
-        uint64_t num_blocks = (element_count + block_size - 1) / block_size;
-        std::vector<float> result;
-        result.reserve(element_count);
-
-        size_t offset = 0;
-        for (uint64_t block = 0; block < num_blocks; ++block) {
-            if (offset + 4 > size) break;
-
-            float scale = *reinterpret_cast<const float*>(data + offset);
-            offset += 4;
-
-            // Q5 has high bits in a separate block
-            uint32_t hbits = 0;
-            if (type == GGUFValueType::Q5_0 || type == GGUFValueType::Q5_1) {
-                if (offset + 4 > size) break;
-                hbits = *reinterpret_cast<const uint32_t*>(data + offset);
-                offset += 4;
+        case 3: {  // Hybrid
+            compression::HybridCompression hybrid;
+            size_t total_elements = 1;
+            for (auto d : info.dimensions) total_elements *= d;
+            std::vector<float> output(total_elements);
+            if (!hybrid.decompress(compressed_data.data(), compressed_data.size(),
+                                   total_elements * sizeof(float), output.data())) {
+                return -6;
             }
-
-            for (uint32_t i = 0; i < block_size && result.size() < element_count; ++i) {
-                if (offset >= size) break;
-
-                uint8_t packed = data[offset++];
-                uint8_t hbit = (hbits >> i) & 1;
-                uint8_t q = ((packed & 0x0F) | (hbit << 4));
-
-                if (type == GGUFValueType::Q5_0) {
-                    result.push_back(scale * static_cast<float>(q - 16));
-                } else {
-                    // Q5_1 has min value as well
-                    result.push_back(scale * static_cast<float>(q));
-                }
-
-                if (result.size() < element_count) {
-                    hbit = (hbits >> (i + 16)) & 1;
-                    q = (((packed >> 4) & 0x0F) | (hbit << 4));
-
-                    if (type == GGUFValueType::Q5_0) {
-                        result.push_back(scale * static_cast<float>(q - 16));
-                    } else {
-                        result.push_back(scale * static_cast<float>(q));
-                    }
-                }
-            }
+            return output;
         }
-
-        return result;
+        default:
+            return -6;  // Unknown codec
     }
+}
 
-    std::vector<float> convert_raw_to_fp32(const std::vector<uint8_t>& data,
-                                            GGUFValueType data_type,
-                                            uint64_t expected_elements) {
-        std::vector<float> result;
-        result.reserve(expected_elements);
-
-        switch (data_type) {
-            case GGUFValueType::FLOAT32: {
-                const float* ptr = reinterpret_cast<const float*>(data.data());
-                size_t count = std::min(expected_elements, data.size() / sizeof(float));
-                result.assign(ptr, ptr + count);
-                break;
-            }
-            case GGUFValueType::FLOAT16: {
-                const uint16_t* ptr = reinterpret_cast<const uint16_t*>(data.data());
-                size_t count = std::min(expected_elements, data.size() / sizeof(uint16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(fp16_to_fp32(ptr[i]));
+Expected<std::vector<float>> StreamingTensorReader::dequantize_data(
+    const std::vector<uint8_t>& raw_data, const GGUFTensorInfo& info) {
+    
+    size_t num_elements = 1;
+    for (auto d : info.dimensions) num_elements *= d;
+    
+    std::vector<float> result;
+    result.reserve(num_elements);
+    
+    const uint8_t* ptr = raw_data.data();
+    
+    switch (info.data_type) {
+        case GGUFValueType::Q4_0: {
+            const size_t block_size = 32;
+            const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+            
+            for (size_t b = 0; b < num_blocks && (ptr - raw_data.data() + 2 + block_size/2) <= raw_data.size(); ++b) {
+                float scale = *reinterpret_cast<const float*>(ptr);
+                ptr += sizeof(float);
+                
+                for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
+                    uint8_t packed = ptr[i];
+                    int8_t q0 = (packed & 0x0F) - 8;
+                    int8_t q1 = ((packed >> 4) & 0x0F) - 8;
+                    result.push_back(q0 * scale);
+                    if (result.size() < num_elements) result.push_back(q1 * scale);
                 }
-                break;
+                ptr += block_size / 2;
             }
-            case GGUFValueType::BFLOAT16: {
-                const uint16_t* ptr = reinterpret_cast<const uint16_t*>(data.data());
-                size_t count = std::min(expected_elements, data.size() / sizeof(uint16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(bf16_to_fp32(ptr[i]));
-                }
-                break;
-            }
-            case GGUFValueType::INT8: {
-                const int8_t* ptr = reinterpret_cast<const int8_t*>(data.data());
-                size_t count = std::min(expected_elements, data.size());
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(static_cast<float>(ptr[i]));
-                }
-                break;
-            }
-            case GGUFValueType::INT16: {
-                const int16_t* ptr = reinterpret_cast<const int16_t*>(data.data());
-                size_t count = std::min(expected_elements, data.size() / sizeof(int16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(static_cast<float>(ptr[i]));
-                }
-                break;
-            }
-            default:
-                break;
+            break;
         }
-
-        return result;
-    }
-
-    static bool is_quantized_type(GGUFValueType type) {
-        return type >= GGUFValueType::Q4_0 && type <= GGUFValueType::Q8_1;
-    }
-
-    static float fp16_to_fp32(uint16_t h) {
-        uint32_t sign = (h >> 15) & 0x1;
-        uint32_t exp = (h >> 10) & 0x1F;
-        uint32_t mant = h & 0x3FF;
-
-        if (exp == 0) {
-            if (mant == 0) return sign ? -0.0f : 0.0f;
-            float val = mant * std::pow(2.0f, -24.0f);
-            return sign ? -val : val;
-        } else if (exp == 31) {
-            if (mant == 0) {
-                return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
+        case GGUFValueType::Q4_1: {
+            const size_t block_size = 32;
+            const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+            
+            for (size_t b = 0; b < num_blocks && (ptr - raw_data.data() + 4 + block_size/2) <= raw_data.size(); ++b) {
+                float scale = *reinterpret_cast<const float*>(ptr);
+                ptr += sizeof(float);
+                float min = *reinterpret_cast<const float*>(ptr);
+                ptr += sizeof(float);
+                
+                for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
+                    uint8_t packed = ptr[i];
+                    float q0 = static_cast<float>(packed & 0x0F);
+                    float q1 = static_cast<float>((packed >> 4) & 0x0F);
+                    result.push_back(q0 * scale + min);
+                    if (result.size() < num_elements) result.push_back(q1 * scale + min);
+                }
+                ptr += block_size / 2;
             }
-            return std::numeric_limits<float>::quiet_NaN();
+            break;
         }
-
-        float val = std::pow(2.0f, static_cast<float>(exp - 15)) * (1.0f + mant / 1024.0f);
-        return sign ? -val : val;
-    }
-
-    static float bf16_to_fp32(uint16_t b) {
-        uint32_t val = static_cast<uint32_t>(b) << 16;
-        float result;
-        std::memcpy(&result, &val, sizeof(float));
-        return result;
-    }
-
-    static uint32_t crc32(const uint8_t* data, size_t size) {
-        static const uint32_t crc_table[256] = {
-            0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
-            0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
-            0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2,
-            0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7,
-            0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9,
-            0xfa0f3d63, 0x8d080df5, 0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172,
-            0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b, 0x35b5a8fa, 0x42b2986c,
-            0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59,
-            0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423,
-            0xcfba9599, 0xb8bda50f, 0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924,
-            0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d, 0x76dc4190, 0x01db7106,
-            0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433,
-            0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d,
-            0x91646c97, 0xe6635c01, 0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e,
-            0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457, 0x65b0d9c6, 0x12b7e950,
-            0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65,
-            0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7,
-            0xa4d1c46d, 0xd3d6f4fb, 0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0,
-            0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9, 0x5005713c, 0x270241aa,
-            0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
-            0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81,
-            0xb7bd5c3b, 0xc0ba6cad, 0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a,
-            0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683, 0xe3630b12, 0x94643b84,
-            0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
-            0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb,
-            0x196c3671, 0x6e6b06e7, 0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc,
-            0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5, 0xd6d6a3e8, 0xa1d1937e,
-            0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b,
-            0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55,
-            0x316e8eef, 0x4669be79, 0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236,
-            0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f, 0xc5ba3bbe, 0xb2bd0b28,
-            0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d,
-            0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f,
-            0x72076785, 0x05005713, 0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38,
-            0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21, 0x86d3d2d4, 0xf1d4e242,
-            0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777,
-            0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69,
-            0x616bffd3, 0x166ccf45, 0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2,
-            0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db, 0xaed16a4a, 0xd9d65adc,
-            0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9,
-            0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693,
-            0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
-            0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
-        };
-
-        uint32_t crc = 0xFFFFFFFF;
-        for (size_t i = 0; i < size; ++i) {
-            crc = crc_table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+        case GGUFValueType::Q8_0: {
+            const size_t block_size = 32;
+            const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+            
+            for (size_t b = 0; b < num_blocks && (ptr - raw_data.data() + 2 + block_size) <= raw_data.size(); ++b) {
+                float scale = *reinterpret_cast<const float*>(ptr);
+                ptr += sizeof(float);
+                
+                for (size_t i = 0; i < block_size && result.size() < num_elements; ++i) {
+                    int8_t q = static_cast<int8_t>(ptr[i]);
+                    result.push_back(q * scale);
+                }
+                ptr += block_size;
+            }
+            break;
         }
-        return crc ^ 0xFFFFFFFF;
+        default:
+            return -20;  // Unsupported quantization type
     }
-};
+    
+    return result;
+}
 
 // ============================================================================
-// Full GGUFLoader Implementation with All Enhancements
+// GGUFLoaderImpl - Private Implementation
 // ============================================================================
 class GGUFLoaderImpl {
 public:
-    explicit GGUFLoaderImpl(const Path& file_path)
-        : file_path_(file_path),
-          data_offset_(0),
-          thread_pool_(std::max(4u, std::thread::hardware_concurrency())),
-          tensor_cache_(create_cache_config()),
-          hybrid_decompressor_(std::make_unique<HybridDecompressor>()),
-          is_sharded_(false) {
-        compression::Blosc2Compression::initialize();
-    }
+    explicit GGUFLoaderImpl(const Path& file_path) : file_path_(file_path) {}
+    ~GGUFLoaderImpl() { close(); }
 
     ExpectedVoid load() {
-        // Open file
-        file_.open(file_path_.c_str(), std::ios::binary);
+        file_.open(file_path_.string(), std::ios::binary);
         if (!file_.is_open()) {
-            return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+            return -1;  // File open error
         }
 
-        // Read and validate header
-        auto header_result = read_header();
-        if (!header_result.has_value()) {
-            return header_result;
+        // Read header
+        file_.read(reinterpret_cast<char*>(&header_), sizeof(GGUFHeader));
+        if (header_.magic != 0x46554747) {  // "GGUF" in little-endian
+            return -2;  // Invalid magic
         }
 
-        // Read metadata
-        auto metadata_result = read_metadata();
-        if (!metadata_result.has_value()) {
-            return metadata_result;
+        version_ = header_.version;
+
+        // Parse metadata
+        if (!parse_metadata()) {
+            return -3;  // Metadata parse error
         }
 
-        // Read tensor info
-        auto tensor_result = read_tensors();
-        if (!tensor_result.has_value()) {
-            return tensor_result;
+        // Parse tensor info
+        if (!parse_tensor_info()) {
+            return -4;  // Tensor info parse error
         }
 
         // Parse vocabulary from metadata
-        VocabularyParser vocab_parser;
-        auto [vocab, tokenizer_config] = vocab_parser.parse_from_metadata(file_, metadata_);
-        vocabulary_ = std::move(vocab);
-        tokenizer_config_ = std::move(tokenizer_config);
+        parse_vocabulary();
 
-        // Parse model configuration
-        parse_model_config();
+        // Calculate data start offset
+        data_start_offset_ = file_.tellg();
 
-        // Create tensor pack mappings
-        TensorPackMapper mapper;
-        tensor_mappings_ = mapper.create_mappings(tensors_, model_config_);
-        layer_groups_ = mapper.create_layer_groups(tensor_mappings_);
-
-        // Initialize streaming reader
-        stream_reader_ = std::make_unique<StreamingTensorReader>(file_path_);
-        if (!stream_reader_->open()) {
-            return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+        // Update tensor data offsets
+        for (auto& [name, info] : tensors_) {
+            info.data_offset = data_start_offset_ + info.offset;
+            info.data_size = calculate_tensor_data_size(info);
         }
 
-        return make_expected_success();
+        loaded_ = true;
+        return ExpectedVoid();
     }
 
     ExpectedVoid close() {
         if (file_.is_open()) {
             file_.close();
         }
-        if (stream_reader_) {
-            stream_reader_->close();
+        loaded_ = false;
+        return ExpectedVoid();
+    }
+
+    ModelConfig get_model_config() const {
+        ModelConfig config;
+        
+        // Extract config from metadata
+        if (auto kv = get_metadata_kv("llama.embedding_length")) {
+            config.hidden_size = kv->get_uint32();
+        } else if (auto kv2 = get_metadata_kv("general.embedding_length")) {
+            config.hidden_size = kv2->get_uint32();
         }
 
-        // Clean up metadata values
-        for (auto& kv : metadata_) {
-            if (kv.value) {
-                free_metadata_value(kv.value_type, kv.value);
-                kv.value = nullptr;
+        if (auto kv = get_metadata_kv("llama.block_count")) {
+            config.num_layers = kv->get_uint32();
+        } else if (auto kv2 = get_metadata_kv("general.block_count")) {
+            config.num_layers = kv2->get_uint32();
+        }
+
+        if (auto kv = get_metadata_kv("llama.attention.head_count")) {
+            config.num_attention_heads = kv->get_uint32();
+        }
+
+        if (auto kv = get_metadata_kv("llama.attention.head_count_kv")) {
+            config.num_key_value_heads = kv->get_uint32();
+        } else {
+            config.num_key_value_heads = config.num_attention_heads;
+        }
+
+        if (auto kv = get_metadata_kv("llama.feed_forward_length")) {
+            config.intermediate_size = kv->get_uint32();
+        }
+
+        if (auto kv = get_metadata_kv("llama.vocab_size")) {
+            config.vocab_size = kv->get_uint32();
+        } else if (auto kv2 = get_metadata_kv("tokenizer.ggml.tokens")) {
+            // Count tokens in array
+            auto arr_data = kv2->get_array_data();
+            if (arr_data.size() >= 8) {
+                config.vocab_size = *reinterpret_cast<const uint64_t*>(arr_data.data() + 4);
             }
         }
 
-        return make_expected_success();
+        if (auto kv = get_metadata_kv("llama.rope.freq_base")) {
+            config.rope_theta = kv->get_float32();
+        }
+
+        if (auto kv = get_metadata_kv("llama.context_length")) {
+            config.max_position_embeddings = kv->get_uint32();
+        }
+
+        if (auto kv = get_metadata_kv("general.architecture")) {
+            config.model_type = kv->get_string();
+        }
+
+        config.head_dim = config.hidden_size / config.num_attention_heads;
+        
+        return config;
     }
 
-    // Enhanced tensor data loading with LRU cache and hybrid decompression
-    Expected<std::vector<float>> load_tensor_data(const std::string& tensor_name, bool convert_fp16 = true) {
-        // Check cache first
-        std::vector<float> cached_result;
-        if (tensor_cache_.get(tensor_name, cached_result)) {
-            return Expected<std::vector<float>>(std::move(cached_result));
-        }
-
-        const GGUFTensorInfo* tensor = find_tensor(tensor_name);
-        if (!tensor) {
-            return Expected<std::vector<float>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
-        }
-
-        return read_and_decompress_tensor(*tensor, convert_fp16);
-    }
-
-    // Read tensor data with explicit tensor info
-    Expected<std::vector<float>> read_tensor_data(const GGUFTensorInfo& tensor, bool convert_fp16 = true) {
-        // Check cache by name if available
-        std::vector<float> cached_result;
-        if (tensor_cache_.get(tensor.name, cached_result)) {
-            return Expected<std::vector<float>>(std::move(cached_result));
-        }
-
-        return read_and_decompress_tensor(tensor, convert_fp16);
-    }
-
-    // Parallel load multiple tensors with optimized scheduling
-    std::vector<Expected<std::vector<float>>> load_tensors_parallel(
-        const std::vector<std::string>& tensor_names, bool convert_fp16 = true) {
-
-        std::vector<Expected<std::vector<float>>> results(tensor_names.size());
-        std::vector<std::future<void>> futures;
-
-        // Sort tensors by file offset for sequential I/O optimization
-        std::vector<std::pair<size_t, uint64_t>> sorted_indices;
-        sorted_indices.reserve(tensor_names.size());
-
-        for (size_t i = 0; i < tensor_names.size(); ++i) {
-            const auto* tensor = find_tensor(tensor_names[i]);
-            if (tensor) {
-                sorted_indices.push_back({i, tensor->offset});
-            }
-        }
-        std::sort(sorted_indices.begin(), sorted_indices.end(),
-                  [](const auto& a, const auto& b) { return a.second < b.second; });
-
-        // Submit tasks in sorted order for better I/O performance
-        for (const auto& [original_idx, _] : sorted_indices) {
-            futures.push_back(thread_pool_.enqueue([this, &tensor_names, &results, original_idx, convert_fp16]() {
-                results[original_idx] = load_tensor_data(tensor_names[original_idx], convert_fp16);
-            }));
-        }
-
-        for (auto& f : futures) {
-            f.wait();
-        }
-
-        return results;
-    }
-
-    // Batch load entire layer for 70B+ models
-    Expected<std::vector<std::vector<float>>> load_layer_tensors(uint32_t layer_idx, bool convert_fp16 = true) {
-        std::vector<std::string> layer_tensor_names;
-
-        for (const auto& mapping : tensor_mappings_) {
-            if (mapping.layer_idx == layer_idx) {
-                layer_tensor_names.push_back(mapping.tensor_name);
-            }
-        }
-
-        if (layer_tensor_names.empty()) {
-            return Expected<std::vector<std::vector<float>>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
-        }
-
-        auto results = load_tensors_parallel(layer_tensor_names, convert_fp16);
-        std::vector<std::vector<float>> data;
-        data.reserve(results.size());
-
-        for (auto& result : results) {
-            if (result.has_value()) {
-                data.push_back(std::move(result.value()));
-            } else {
-                return Expected<std::vector<std::vector<float>>>(result.error());
-            }
-        }
-
-        return Expected<std::vector<std::vector<float>>>(std::move(data));
-    }
-
-    // Prefetch tensors for upcoming layers
-    void prefetch_layers(uint32_t start_layer, uint32_t count) {
-        std::vector<std::string> prefetch_names;
-
-        for (const auto& mapping : tensor_mappings_) {
-            if (mapping.layer_idx >= start_layer && mapping.layer_idx < start_layer + count) {
-                // Only prefetch high-importance tensors
-                if (mapping.importance_score > 0.8f) {
-                    prefetch_names.push_back(mapping.tensor_name);
-                }
-            }
-        }
-
-        if (!prefetch_names.empty()) {
-            // Touch cache entries to prevent eviction
-            for (const auto& name : prefetch_names) {
-                tensor_cache_.touch(name);
-            }
-        }
-    }
-
-    // Generate NomadPack metadata from tensor mappings
-    std::vector<PackMetadata> generate_packs() {
+    std::vector<PackMetadata> generate_packs(const ModelConfig& /*config*/) {
         std::vector<PackMetadata> packs;
-        packs.reserve(tensor_mappings_.size());
+        packs.reserve(tensors_.size());
 
-        for (const auto& mapping : tensor_mappings_) {
+        for (const auto& [name, info] : tensors_) {
             PackMetadata pack;
-            pack.pack_id = mapping.pack_id;
-            pack.type = mapping.pack_type;
-            pack.layer_idx = mapping.layer_idx;
-            pack.head_idx = 0;
-            pack.file_offset = mapping.file_offset;
-            pack.compressed_size = mapping.compressed_size;
-            pack.decompressed_size = mapping.decompressed_size;
-            pack.tensor_name = mapping.tensor_name;
-            pack.base_priority = mapping.importance_score;
+            pack.pack_id = std::hash<std::string>{}(name);
+            pack.tensor_name = name;
+            pack.layer_idx = extract_layer_index(name);
+            pack.head_idx = extract_head_index(name);
+            pack.compressed_size = info.data_size;
+            pack.decompressed_size = info.data_size;
+            pack.file_offset = info.data_offset;
+            pack.base_priority = calculate_priority(name, info);
+            pack.type = classify_tensor_type(name);
+            pack.alignment = 256;
+
             packs.push_back(pack);
         }
 
         return packs;
     }
 
-    // Multi-file shard support
-    ExpectedVoid add_shard(const Path& shard_path) {
-        shard_paths_.push_back(shard_path);
-        is_sharded_ = true;
-
-        if (stream_reader_) {
-            // Get tensor count from shard for proper offset calculation
-            std::ifstream shard_file(shard_path, std::ios::binary);
-            if (!shard_file.is_open()) {
-                return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
-            }
-
-            char magic[4];
-            shard_file.read(magic, 4);
-            if (std::memcmp(magic, "GGUF", 4) != 0) {
-                return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
-            }
-
-            uint32_t version;
-            uint64_t tensor_count, metadata_kv_count;
-            shard_file.read(reinterpret_cast<char*>(&version), 4);
-            shard_file.read(reinterpret_cast<char*>(&tensor_count), 8);
-            shard_file.read(reinterpret_cast<char*>(&metadata_kv_count), 8);
-
-            uint64_t tensor_start = header_.tensor_count;
-            stream_reader_->add_shard(shard_path, tensor_start, tensor_count);
-        }
-
-        return make_expected_success();
-    }
-
-    bool is_sharded() const { return is_sharded_; }
-
-    // Cache management
-    void clear_tensor_cache() { tensor_cache_.clear(); }
-    size_t get_tensor_cache_size() const { return tensor_cache_.size(); }
-    double get_tensor_cache_hit_rate() const { return tensor_cache_.hit_rate(); }
-    size_t get_tensor_cache_memory() const { return tensor_cache_.memory_usage(); }
-    EnhancedLRUCache<std::string, std::vector<float>>::CacheStats get_tensor_cache_stats() const { return tensor_cache_.get_stats(); }
-
-    const GGUFHeader& header() const { return header_; }
-    const ModelConfig& model_config() const { return model_config_; }
-    const std::vector<GGUFTensorInfo>& tensors() const { return tensors_; }
-    const std::vector<GGUFMetadataKV>& metadata() const { return metadata_; }
-    const std::vector<VocabularyEntry>& vocabulary() const { return vocabulary_; }
-    const VocabularyParser::TokenizerConfig& tokenizer_config() const { return tokenizer_config_; }
-
-private:
-    Path file_path_;
-    std::ifstream file_;
-    std::unique_ptr<StreamingTensorReader> stream_reader_;
-
-    GGUFHeader header_;
-    std::vector<GGUFMetadataKV> metadata_;
-    std::vector<GGUFTensorInfo> tensors_;
-    ModelConfig model_config_;
-    uint64_t data_offset_;
-    std::vector<TensorPackMapper::PackMapping> tensor_mappings_;
-    std::vector<TensorPackMapper::LayerGroup> layer_groups_;
-
-    WorkStealingThreadPool thread_pool_;
-    EnhancedLRUCache<std::string, std::vector<float>> tensor_cache_;
-    std::unique_ptr<HybridDecompressor> hybrid_decompressor_;
-
-    std::vector<VocabularyEntry> vocabulary_;
-    VocabularyParser::TokenizerConfig tokenizer_config_;
-
-    std::vector<Path> shard_paths_;
-    bool is_sharded_;
-
-    typename EnhancedLRUCache<std::string, std::vector<float>>::CacheConfig create_cache_config() {
-        typename EnhancedLRUCache<std::string, std::vector<float>>::CacheConfig config;
-
-        // Configure based on available system memory
-        auto& cfg = ConfigManager::instance();
-        config.max_size = cfg.get_int("cache", "max_entries", 100);
-        config.max_memory_bytes = cfg.get_int("cache", "max_memory_mb", 4096) * 1024 * 1024;
-        config.ttl_ms = cfg.get_int("cache", "ttl_seconds", 300) * 1000;
-        config.enable_stats = true;
-
-        return config;
-    }
-
-    Expected<std::vector<float>> read_and_decompress_tensor(const GGUFTensorInfo& tensor, bool convert_fp16) {
-        uint64_t tensor_size = calculate_tensor_size(tensor);
-        uint64_t element_count = tensor_size / get_type_size(tensor.data_type);
-
-        if (tensor.data_type == GGUFValueType::FLOAT16 && convert_fp16) {
-            element_count = tensor_size / 2;
-        }
-
-        // Read tensor data in parallel chunks
-        std::vector<uint8_t> raw_data(tensor_size);
-        bool read_success = stream_reader_->read_parallel(thread_pool_, tensor.offset,
-                                                          raw_data.data(), tensor_size);
-
-        if (!read_success) {
-            return Expected<std::vector<float>>(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
-        }
-
-        // Apply hybrid decompression
-        std::vector<float> result = hybrid_decompressor_->decompress(raw_data, element_count, tensor.data_type);
-
-        if (result.empty()) {
-            // Fallback to direct type conversion
-            result = convert_raw_to_fp32_fallback(raw_data, tensor.data_type, element_count);
-        }
-
-        // Store in cache
-        if (!result.empty()) {
-            size_t memory_cost = result.size() * sizeof(float);
-            tensor_cache_.put(tensor.name, result, memory_cost);
-        }
-
-        return Expected<std::vector<float>>(std::move(result));
-    }
-
-    const GGUFTensorInfo* find_tensor(const std::string& name) const {
-        for (const auto& tensor : tensors_) {
-            if (tensor.name == name) {
-                return &tensor;
-            }
+    const GGUFTensorInfo* get_tensor(const std::string& name) const {
+        auto it = tensors_.find(name);
+        if (it != tensors_.end()) {
+            return &it->second;
         }
         return nullptr;
     }
 
-    ExpectedVoid read_header() {
-        char magic[4];
-        file_.read(magic, 4);
-
-        if (std::memcmp(magic, "GGUF", 4) != 0) {
-            return ExpectedVoid(static_cast<int>(VK_ERROR_INITIALIZATION_FAILED));
+    Expected<std::vector<float>> read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32) {
+        if (!file_.is_open()) {
+            return -10;
         }
 
-        file_.read(reinterpret_cast<char*>(&header_.version), 4);
-        file_.read(reinterpret_cast<char*>(&header_.tensor_count), 8);
-        file_.read(reinterpret_cast<char*>(&header_.metadata_kv_count), 8);
+        std::vector<uint8_t> raw_data(tensor.data_size);
+        
+        file_.seekg(tensor.data_offset);
+        file_.read(reinterpret_cast<char*>(raw_data.data()), tensor.data_size);
 
-        return make_expected_success();
+        if (!file_) {
+            return -11;
+        }
+
+        // Handle quantization
+        if (tensor.data_type >= GGUFValueType::Q4_0 && tensor.data_type <= GGUFValueType::IQ4_XS_3) {
+            return dequantize_tensor(raw_data, tensor);
+        }
+
+        // Handle FP16 to FP32 conversion
+        if (tensor.data_type == GGUFValueType::FLOAT16 && fp16_to_fp32) {
+            return convert_fp16_to_fp32(raw_data);
+        }
+
+        // Raw float data
+        if (tensor.data_type == GGUFValueType::FLOAT32) {
+            std::vector<float> result(raw_data.size() / sizeof(float));
+            std::memcpy(result.data(), raw_data.data(), raw_data.size());
+            return result;
+        }
+
+        return -12;  // Unsupported data type
     }
 
-    ExpectedVoid read_metadata() {
+    const std::vector<VocabularyEntry>& get_vocabulary() const {
+        return vocabulary_;
+    }
+
+    const TokenizerConfig& get_tokenizer_config() const {
+        return tokenizer_config_;
+    }
+
+    uint64 tensor_count() const { return header_.tensor_count; }
+    uint64 metadata_count() const { return header_.metadata_kv_count; }
+    bool is_loaded() const { return loaded_; }
+    uint32_t version() const { return version_; }
+
+    std::vector<std::string> get_tensor_names() const {
+        std::vector<std::string> names;
+        names.reserve(tensors_.size());
+        for (const auto& [name, _] : tensors_) {
+            names.push_back(name);
+        }
+        return names;
+    }
+
+    std::vector<std::string> get_metadata_keys() const {
+        std::vector<std::string> keys;
+        keys.reserve(metadata_.size());
+        for (const auto& [key, _] : metadata_) {
+            keys.push_back(key);
+        }
+        return keys;
+    }
+
+    const GGUFMetadataKV* get_metadata(const std::string& key) const {
+        auto it = metadata_.find(key);
+        if (it != metadata_.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
+
+private:
+    Path file_path_;
+    std::ifstream file_;
+    GGUFHeader header_{};
+    uint32_t version_ = 0;
+    uint64_t data_start_offset_ = 0;
+    bool loaded_ = false;
+
+    std::unordered_map<std::string, GGUFMetadataKV> metadata_;
+    std::unordered_map<std::string, GGUFTensorInfo> tensors_;
+    std::vector<VocabularyEntry> vocabulary_;
+    TokenizerConfig tokenizer_config_;
+
+    bool parse_metadata() {
         for (uint64_t i = 0; i < header_.metadata_kv_count; ++i) {
             GGUFMetadataKV kv;
+            
+            // Read key length and key
+            uint64_t key_len;
+            file_.read(reinterpret_cast<char*>(&key_len), sizeof(uint64_t));
+            if (!file_) return false;
+            
+            std::vector<char> key_data(key_len);
+            file_.read(key_data.data(), key_len);
+            if (!file_) return false;
+            kv.key = std::string(key_data.data(), key_len);
 
-            auto str_result = read_string(kv.key);
-            if (!str_result.has_value()) {
-                return str_result;
+            // Read value type
+            uint32_t value_type_int;
+            file_.read(reinterpret_cast<char*>(&value_type_int), sizeof(uint32_t));
+            kv.value_type = static_cast<GGUFValueType>(value_type_int);
+
+            // Read value
+            if (!read_value(file_, kv.value_type, kv.raw_value)) {
+                return false;
             }
 
-            file_.read(reinterpret_cast<char*>(&kv.value_type), 4);
-            kv.value = read_value_by_type(kv.value_type);
-
-            metadata_.push_back(kv);
+            metadata_[kv.key] = std::move(kv);
         }
-
-        return make_expected_success();
+        return true;
     }
 
-    ExpectedVoid read_tensors() {
-        uint64_t current_offset = 0;
-
+    bool parse_tensor_info() {
         for (uint64_t i = 0; i < header_.tensor_count; ++i) {
-            GGUFTensorInfo tensor;
+            GGUFTensorInfo info;
 
-            auto str_result = read_string(tensor.name);
-            if (!str_result.has_value()) {
-                return str_result;
+            // Read name
+            uint64_t name_len;
+            file_.read(reinterpret_cast<char*>(&name_len), sizeof(uint64_t));
+            if (!file_) return false;
+            
+            std::vector<char> name_data(name_len);
+            file_.read(name_data.data(), name_len);
+            if (!file_) return false;
+            info.name = std::string(name_data.data(), name_len);
+
+            // Read dimensions
+            uint32_t n_dims;
+            file_.read(reinterpret_cast<char*>(&n_dims), sizeof(uint32_t));
+            info.n_dimensions = n_dims;
+            
+            info.dimensions.resize(n_dims);
+            for (uint32_t d = 0; d < n_dims; ++d) {
+                file_.read(reinterpret_cast<char*>(&info.dimensions[d]), sizeof(uint64_t));
             }
 
-            file_.read(reinterpret_cast<char*>(&tensor.n_dimensions), 4);
-            tensor.dimensions.resize(tensor.n_dimensions);
+            // Read data type
+            uint32_t dtype;
+            file_.read(reinterpret_cast<char*>(&dtype), sizeof(uint32_t));
+            info.data_type = static_cast<GGUFValueType>(dtype);
 
-            for (uint32_t j = 0; j < tensor.n_dimensions; ++j) {
-                file_.read(reinterpret_cast<char*>(&tensor.dimensions[j]), 8);
-            }
+            // Read offset
+            file_.read(reinterpret_cast<char*>(&info.offset), sizeof(uint64_t));
 
-            file_.read(reinterpret_cast<char*>(&tensor.data_type), 4);
-            file_.read(reinterpret_cast<char*>(&tensor.offset), 8);
-
-            tensors_.push_back(tensor);
-
-            uint64_t tensor_end = tensor.offset + calculate_tensor_size(tensor);
-            current_offset = std::max(current_offset, tensor_end);
+            tensors_[info.name] = std::move(info);
         }
-
-        data_offset_ = align_offset(current_offset, 4096);
-
-        return make_expected_success();
+        return true;
     }
 
-    ExpectedVoid read_string(std::string& str) {
-        uint64_t len;
-        file_.read(reinterpret_cast<char*>(&len), 8);
-
-        str.resize(len);
-        file_.read(&str[0], static_cast<std::streamsize>(len));
-
-        return make_expected_success();
-    }
-
-    void* read_value_by_type(GGUFValueType type) {
-        void* value = nullptr;
-
+    bool read_value(std::ifstream& file, GGUFValueType type, std::vector<uint8_t>& out) {
         switch (type) {
-            case GGUFValueType::UINT8: {
-                uint8_t* val = new uint8_t;
-                file_.read(reinterpret_cast<char*>(val), 1);
-                value = val;
-                break;
-            }
-            case GGUFValueType::INT8: {
-                int8_t* val = new int8_t;
-                file_.read(reinterpret_cast<char*>(val), 1);
-                value = val;
-                break;
-            }
-            case GGUFValueType::UINT16: {
-                uint16_t* val = new uint16_t;
-                file_.read(reinterpret_cast<char*>(val), 2);
-                value = val;
-                break;
-            }
-            case GGUFValueType::INT16: {
-                int16_t* val = new int16_t;
-                file_.read(reinterpret_cast<char*>(val), 2);
-                value = val;
-                break;
-            }
-            case GGUFValueType::UINT32: {
-                uint32_t* val = new uint32_t;
-                file_.read(reinterpret_cast<char*>(val), 4);
-                value = val;
-                break;
-            }
-            case GGUFValueType::INT32: {
-                int32_t* val = new int32_t;
-                file_.read(reinterpret_cast<char*>(val), 4);
-                value = val;
-                break;
-            }
-            case GGUFValueType::FLOAT32: {
-                float* val = new float;
-                file_.read(reinterpret_cast<char*>(val), 4);
-                value = val;
-                break;
-            }
-            case GGUFValueType::UINT64: {
-                uint64_t* val = new uint64_t;
-                file_.read(reinterpret_cast<char*>(val), 8);
-                value = val;
-                break;
-            }
-            case GGUFValueType::INT64: {
-                int64_t* val = new int64_t;
-                file_.read(reinterpret_cast<char*>(val), 8);
-                value = val;
-                break;
-            }
-            case GGUFValueType::FLOAT64: {
-                double* val = new double;
-                file_.read(reinterpret_cast<char*>(val), 8);
-                value = val;
-                break;
-            }
-            case GGUFValueType::BOOL: {
-                bool* val = new bool;
-                file_.read(reinterpret_cast<char*>(val), 1);
-                value = val;
-                break;
-            }
+            case GGUFValueType::UINT8:
+            case GGUFValueType::INT8:
+            case GGUFValueType::BOOL:
+                out.resize(1);
+                file.read(reinterpret_cast<char*>(out.data()), 1);
+                return file.good();
+
+            case GGUFValueType::UINT16:
+            case GGUFValueType::INT16:
+                out.resize(2);
+                file.read(reinterpret_cast<char*>(out.data()), 2);
+                return file.good();
+
+            case GGUFValueType::UINT32:
+            case GGUFValueType::INT32:
+            case GGUFValueType::FLOAT32:
+                out.resize(4);
+                file.read(reinterpret_cast<char*>(out.data()), 4);
+                return file.good();
+
+            case GGUFValueType::UINT64:
+            case GGUFValueType::INT64:
+            case GGUFValueType::FLOAT64:
+                out.resize(8);
+                file.read(reinterpret_cast<char*>(out.data()), 8);
+                return file.good();
+
             case GGUFValueType::STRING: {
-                std::string* val = new std::string;
-                read_string(*val);
-                value = val;
-                break;
+                uint64_t len;
+                file.read(reinterpret_cast<char*>(&len), sizeof(uint64_t));
+                if (!file) return false;
+                out.resize(8 + len);
+                *reinterpret_cast<uint64_t*>(out.data()) = len;
+                file.read(reinterpret_cast<char*>(out.data() + 8), len);
+                return file.good();
             }
+
             case GGUFValueType::ARRAY: {
-                GGUFValueType elem_type;
+                uint32_t elem_type;
                 uint64_t count;
-                file_.read(reinterpret_cast<char*>(&elem_type), 4);
-                file_.read(reinterpret_cast<char*>(&count), 8);
-
-                std::vector<uint8_t>* val = new std::vector<uint8_t>;
-                val->resize(12 + count * get_type_size(elem_type));
-                *reinterpret_cast<uint32_t*>(val->data()) = static_cast<uint32_t>(elem_type);
-                *reinterpret_cast<uint64_t*>(val->data() + 4) = count;
-                file_.read(reinterpret_cast<char*>(val->data() + 12),
-                          static_cast<std::streamsize>(count * get_type_size(elem_type)));
-                value = val;
-                break;
+                file.read(reinterpret_cast<char*>(&elem_type), sizeof(uint32_t));
+                file.read(reinterpret_cast<char*>(&count), sizeof(uint64_t));
+                if (!file) return false;
+                
+                // Preallocate
+                out.resize(12);
+                *reinterpret_cast<uint32_t*>(out.data()) = elem_type;
+                *reinterpret_cast<uint64_t*>(out.data() + 4) = count;
+                
+                // Read array elements
+                GGUFValueType elem_type_enum = static_cast<GGUFValueType>(elem_type);
+                for (uint64_t i = 0; i < count; ++i) {
+                    std::vector<uint8_t> elem_data;
+                    if (!read_value(file, elem_type_enum, elem_data)) {
+                        return false;
+                    }
+                    out.insert(out.end(), elem_data.begin(), elem_data.end());
+                }
+                return true;
             }
+
             default:
-                value = nullptr;
-                break;
-        }
-
-        return value;
-    }
-
-    void free_metadata_value(GGUFValueType type, void* value) {
-        if (!value) return;
-
-        switch (type) {
-            case GGUFValueType::UINT8: delete static_cast<uint8_t*>(value); break;
-            case GGUFValueType::INT8: delete static_cast<int8_t*>(value); break;
-            case GGUFValueType::UINT16: delete static_cast<uint16_t*>(value); break;
-            case GGUFValueType::INT16: delete static_cast<int16_t*>(value); break;
-            case GGUFValueType::UINT32: delete static_cast<uint32_t*>(value); break;
-            case GGUFValueType::INT32: delete static_cast<int32_t*>(value); break;
-            case GGUFValueType::FLOAT32: delete static_cast<float*>(value); break;
-            case GGUFValueType::UINT64: delete static_cast<uint64_t*>(value); break;
-            case GGUFValueType::INT64: delete static_cast<int64_t*>(value); break;
-            case GGUFValueType::FLOAT64: delete static_cast<double*>(value); break;
-            case GGUFValueType::BOOL: delete static_cast<bool*>(value); break;
-            case GGUFValueType::STRING: delete static_cast<std::string*>(value); break;
-            case GGUFValueType::ARRAY: delete static_cast<std::vector<uint8_t>*>(value); break;
-            default: delete[] static_cast<char*>(value); break;
+                // For quantized types, treat as raw bytes
+                return false;
         }
     }
 
-    void parse_model_config() {
-        for (const auto& kv : metadata_) {
-            if (kv.key == "general.architecture" && kv.value_type == GGUFValueType::STRING) {
-                model_config_.model_type = *static_cast<std::string*>(kv.value);
-            } else if (kv.key == "llama.context_length" || kv.key == "llama.contextLength") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.max_position_embeddings = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.embedding_length" || kv.key == "llama.embeddingLength") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.hidden_size = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.feed_forward_length" || kv.key == "llama.feedForwardLength") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.intermediate_size = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.attention.head_count" || kv.key == "llama.attention.headCount") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.num_attention_heads = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.attention.head_count_kv" || kv.key == "llama.attention.headCountKV") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.num_key_value_heads = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.block_count" || kv.key == "llama.blockCount") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.num_layers = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.vocab_size" || kv.key == "llama.vocabSize") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.vocab_size = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.rope.dimension_count" || kv.key == "llama.rope.dimensionCount") {
-                if (kv.value_type == GGUFValueType::UINT32) {
-                    model_config_.head_dim = *static_cast<uint32_t*>(kv.value);
-                }
-            } else if (kv.key == "llama.rope.freq_base" || kv.key == "llama.rope.freqBase") {
-                if (kv.value_type == GGUFValueType::FLOAT32) {
-                    model_config_.rope_theta = *static_cast<float*>(kv.value);
-                }
-            } else if (kv.key == "llama.attention.layer_norm_rms_epsilon" || kv.key == "llama.attention.layerNormEpsilon") {
-                if (kv.value_type == GGUFValueType::FLOAT32) {
-                    model_config_.rms_epsilon = *static_cast<float*>(kv.value);
+    void parse_vocabulary() {
+        // Find tokenizer.ggml.tokens
+        auto tokens_kv = get_metadata_kv("tokenizer.ggml.tokens");
+        if (!tokens_kv) {
+            std::cerr << "[GGUFLoader] No vocabulary found in metadata" << std::endl;
+            return;
+        }
+
+        // Parse tokenizer configuration
+        if (auto kv = get_metadata_kv("tokenizer.ggml.model")) {
+            tokenizer_config_.model_type = kv->get_string();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.bos_token_id")) {
+            tokenizer_config_.bos_token_id = kv->get_uint32();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.eos_token_id")) {
+            tokenizer_config_.eos_token_id = kv->get_uint32();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.padding_token_id")) {
+            tokenizer_config_.pad_token_id = kv->get_uint32();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.unknown_token_id")) {
+            tokenizer_config_.unk_token_id = kv->get_uint32();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.add_bos_token")) {
+            tokenizer_config_.add_bos_token = kv->get_bool();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.ggml.add_eos_token")) {
+            tokenizer_config_.add_eos_token = kv->get_bool();
+        }
+        if (auto kv = get_metadata_kv("tokenizer.chat_template")) {
+            tokenizer_config_.chat_template = kv->get_string();
+        }
+
+        // Parse tokens array
+        auto arr_data = tokens_kv->get_array_data();
+        if (arr_data.size() < 8) {
+            std::cerr << "[GGUFLoader] Invalid tokens array" << std::endl;
+            return;
+        }
+
+        uint64_t count = *reinterpret_cast<const uint64_t*>(arr_data.data() + 4);
+        vocabulary_.reserve(count);
+
+        size_t offset = 8;
+        for (uint64_t i = 0; i < count && offset < arr_data.size(); ++i) {
+            if (offset + 8 > arr_data.size()) break;
+
+            uint64_t str_len = *reinterpret_cast<const uint64_t*>(arr_data.data() + offset);
+            offset += 8;
+
+            if (offset + str_len > arr_data.size()) break;
+
+            VocabularyEntry entry;
+            entry.token.assign(reinterpret_cast<const char*>(arr_data.data() + offset), str_len);
+            entry.bytes.assign(arr_data.data() + offset, arr_data.data() + offset + str_len);
+            entry.score = 0.0f;
+            entry.token_type = 0;
+            entry.is_special = false;
+
+            vocabulary_.push_back(std::move(entry));
+            offset += str_len;
+        }
+
+        // Parse token scores if available
+        if (auto scores_kv = get_metadata_kv("tokenizer.ggml.scores")) {
+            auto scores_data = scores_kv->get_array_data();
+            if (scores_data.size() >= 8) {
+                uint64_t scores_count = *reinterpret_cast<const uint64_t*>(scores_data.data() + 4);
+                size_t scores_offset = 8;
+                for (size_t i = 0; i < scores_count && i < vocabulary_.size(); ++i) {
+                    if (scores_offset + 4 > scores_data.size()) break;
+                    vocabulary_[i].score = *reinterpret_cast<const float*>(scores_data.data() + scores_offset);
+                    scores_offset += 4;
                 }
             }
         }
 
-        // Calculate head_dim if not provided
-        if (model_config_.head_dim == 0 && model_config_.num_attention_heads > 0) {
-            model_config_.head_dim = model_config_.hidden_size / model_config_.num_attention_heads;
+        // Parse token types if available
+        if (auto types_kv = get_metadata_kv("tokenizer.ggml.token_type")) {
+            auto types_data = types_kv->get_array_data();
+            if (types_data.size() >= 8) {
+                uint64_t types_count = *reinterpret_cast<const uint64_t*>(types_data.data() + 4);
+                size_t types_offset = 8;
+                for (size_t i = 0; i < types_count && i < vocabulary_.size(); ++i) {
+                    if (types_offset + 4 > types_data.size()) break;
+                    vocabulary_[i].token_type = *reinterpret_cast<const uint32_t*>(types_data.data() + types_offset);
+                    types_offset += 4;
+                }
+            }
+        }
+
+        std::cout << "[GGUFLoader] Parsed " << vocabulary_.size() << " vocabulary entries" << std::endl;
+    }
+
+    const GGUFMetadataKV* get_metadata_kv(const std::string& key) const {
+        auto it = metadata_.find(key);
+        if (it != metadata_.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
+
+    uint64_t calculate_tensor_data_size(const GGUFTensorInfo& info) const {
+        size_t num_elements = 1;
+        for (auto d : info.dimensions) num_elements *= d;
+
+        switch (info.data_type) {
+            case GGUFValueType::UINT8:
+            case GGUFValueType::INT8:
+                return num_elements;
+            case GGUFValueType::UINT16:
+            case GGUFValueType::INT16:
+            case GGUFValueType::FLOAT16:
+            case GGUFValueType::BFLOAT16:
+                return num_elements * 2;
+            case GGUFValueType::UINT32:
+            case GGUFValueType::INT32:
+            case GGUFValueType::FLOAT32:
+                return num_elements * 4;
+            case GGUFValueType::UINT64:
+            case GGUFValueType::INT64:
+            case GGUFValueType::FLOAT64:
+                return num_elements * 8;
+            case GGUFValueType::Q4_0:
+                return (num_elements / 32) * (4 + 16) + ((num_elements % 32) ? (4 + 16) : 0);
+            case GGUFValueType::Q4_1:
+                return (num_elements / 32) * (4 + 4 + 16) + ((num_elements % 32) ? (4 + 4 + 16) : 0);
+            case GGUFValueType::Q5_0:
+                return (num_elements / 32) * (4 + 20) + ((num_elements % 32) ? (4 + 20) : 0);
+            case GGUFValueType::Q5_1:
+                return (num_elements / 32) * (4 + 4 + 20) + ((num_elements % 32) ? (4 + 4 + 20) : 0);
+            case GGUFValueType::Q8_0:
+                return (num_elements / 32) * (4 + 32) + ((num_elements % 32) ? (4 + 32) : 0);
+            default:
+                return num_elements * 4;  // Assume float32 for unknown
         }
     }
 
-    static uint64_t align_offset(uint64_t offset, uint64_t alignment) {
-        if (alignment == 0) return offset;
-        return (offset + alignment - 1) / alignment * alignment;
-    }
-
-    std::vector<float> convert_raw_to_fp32_fallback(const std::vector<uint8_t>& data,
-                                                     GGUFValueType data_type,
-                                                     uint64_t element_count) {
+    Expected<std::vector<float>> dequantize_tensor(const std::vector<uint8_t>& data, 
+                                                    const GGUFTensorInfo& info) {
+        size_t num_elements = 1;
+        for (auto d : info.dimensions) num_elements *= d;
+        
         std::vector<float> result;
-        result.reserve(element_count);
+        result.reserve(num_elements);
 
-        switch (data_type) {
-            case GGUFValueType::FLOAT32: {
-                const float* ptr = reinterpret_cast<const float*>(data.data());
-                size_t count = std::min(element_count, data.size() / sizeof(float));
-                result.assign(ptr, ptr + count);
-                break;
-            }
-            case GGUFValueType::FLOAT16: {
-                const uint16_t* ptr = reinterpret_cast<const uint16_t*>(data.data());
-                size_t count = std::min(element_count, data.size() / sizeof(uint16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(fp16_to_fp32(ptr[i]));
+        const uint8_t* ptr = data.data();
+
+        switch (info.data_type) {
+            case GGUFValueType::Q4_0: {
+                const size_t block_size = 32;
+                const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+                const size_t block_bytes = 2 + 16;  // scale (fp16) + quantized values
+                
+                for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
+                    float scale = *reinterpret_cast<const float*>(ptr);
+                    ptr += sizeof(float);
+                    
+                    for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
+                        uint8_t packed = ptr[i];
+                        int8_t q0 = (packed & 0x0F) - 8;
+                        int8_t q1 = ((packed >> 4) & 0x0F) - 8;
+                        result.push_back(q0 * scale);
+                        if (result.size() < num_elements) result.push_back(q1 * scale);
+                    }
+                    ptr += block_size / 2;
                 }
                 break;
             }
-            case GGUFValueType::BFLOAT16: {
-                const uint16_t* ptr = reinterpret_cast<const uint16_t*>(data.data());
-                size_t count = std::min(element_count, data.size() / sizeof(uint16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(bf16_to_fp32(ptr[i]));
+
+            case GGUFValueType::Q4_1: {
+                const size_t block_size = 32;
+                const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+                const size_t block_bytes = 4 + 16;  // scale + min + quantized values
+                
+                for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
+                    float scale = *reinterpret_cast<const float*>(ptr);
+                    ptr += sizeof(float);
+                    float min = *reinterpret_cast<const float*>(ptr);
+                    ptr += sizeof(float);
+                    
+                    for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
+                        uint8_t packed = ptr[i];
+                        float q0 = static_cast<float>(packed & 0x0F);
+                        float q1 = static_cast<float>((packed >> 4) & 0x0F);
+                        result.push_back(q0 * scale + min);
+                        if (result.size() < num_elements) result.push_back(q1 * scale + min);
+                    }
+                    ptr += block_size / 2;
                 }
                 break;
             }
-            case GGUFValueType::INT8: {
-                const int8_t* ptr = reinterpret_cast<const int8_t*>(data.data());
-                size_t count = std::min(element_count, data.size());
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(static_cast<float>(ptr[i]));
+
+            case GGUFValueType::Q8_0: {
+                const size_t block_size = 32;
+                const size_t num_blocks = (num_elements + block_size - 1) / block_size;
+                const size_t block_bytes = 2 + 32;  // scale + quantized values
+                
+                for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
+                    float scale = *reinterpret_cast<const float*>(ptr);
+                    ptr += sizeof(float);
+                    
+                    for (size_t i = 0; i < block_size && result.size() < num_elements; ++i) {
+                        int8_t q = static_cast<int8_t>(ptr[i]);
+                        result.push_back(q * scale);
+                    }
+                    ptr += block_size;
                 }
                 break;
             }
-            case GGUFValueType::INT16: {
-                const int16_t* ptr = reinterpret_cast<const int16_t*>(data.data());
-                size_t count = std::min(element_count, data.size() / sizeof(int16_t));
-                for (size_t i = 0; i < count; ++i) {
-                    result.push_back(static_cast<float>(ptr[i]));
-                }
-                break;
-            }
+
             default:
-                break;
+                return -20;  // Unsupported quantization type
         }
 
         return result;
     }
 
-    static float fp16_to_fp32(uint16_t h) {
-        uint32_t sign = (h >> 15) & 0x1;
-        uint32_t exp = (h >> 10) & 0x1F;
-        uint32_t mant = h & 0x3FF;
+    Expected<std::vector<float>> convert_fp16_to_fp32(const std::vector<uint8_t>& data) {
+        size_t num_elements = data.size() / 2;
+        std::vector<float> result;
+        result.reserve(num_elements);
 
-        if (exp == 0) {
-            if (mant == 0) return sign ? -0.0f : 0.0f;
-            float val = mant * std::pow(2.0f, -24.0f);
-            return sign ? -val : val;
-        } else if (exp == 31) {
-            if (mant == 0) {
-                return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
+        for (size_t i = 0; i < num_elements; ++i) {
+            uint16_t fp16 = *reinterpret_cast<const uint16_t*>(data.data() + i * 2);
+            // Simple FP16 to FP32 conversion
+            uint32_t sign = (fp16 >> 15) & 0x1;
+            uint32_t exponent = (fp16 >> 10) & 0x1F;
+            uint32_t mantissa = fp16 & 0x3FF;
+            
+            if (exponent == 0) {
+                // Zero or subnormal
+                if (mantissa == 0) {
+                    result.push_back(sign ? -0.0f : 0.0f);
+                } else {
+                    // Subnormal number
+                    float val = mantissa / 1024.0f * std::pow(2.0f, -14);
+                    result.push_back(sign ? -val : val);
+                }
+            } else if (exponent == 31) {
+                // Infinity or NaN
+                if (mantissa == 0) {
+                    result.push_back(sign ? -std::numeric_limits<float>::infinity() : 
+                                            std::numeric_limits<float>::infinity());
+                } else {
+                    result.push_back(std::numeric_limits<float>::quiet_NaN());
+                }
+            } else {
+                // Normal number
+                float val = (1.0f + mantissa / 1024.0f) * std::pow(2.0f, exponent - 15);
+                result.push_back(sign ? -val : val);
             }
-            return std::numeric_limits<float>::quiet_NaN();
         }
 
-        float val = std::pow(2.0f, static_cast<float>(exp - 15)) * (1.0f + mant / 1024.0f);
-        return sign ? -val : val;
+        return result;
     }
 
-    static float bf16_to_fp32(uint16_t b) {
-        uint32_t val = static_cast<uint32_t>(b) << 16;
-        float result;
-        std::memcpy(&result, &val, sizeof(float));
-        return result;
+    uint32_t extract_layer_index(const std::string& name) const {
+        // Extract layer number from names like "blk.0.attn_q.weight"
+        std::regex layer_regex(R"(blk\.(\d+))");
+        std::smatch match;
+        if (std::regex_search(name, match, layer_regex)) {
+            return std::stoul(match[1].str());
+        }
+        return 0;
+    }
+
+    uint32_t extract_head_index(const std::string& /*name*/) const {
+        // Extract head index if present in tensor name
+        return 0;  // Default to 0 for now
+    }
+
+    float calculate_priority(const std::string& name, const GGUFTensorInfo& /*info*/) const {
+        float priority = 0.5f;
+        
+        // Higher priority for attention weights
+        if (name.find("attn") != std::string::npos) {
+            priority += 0.2f;
+        }
+        
+        // Higher priority for embedding and output layers
+        if (name.find("token_embd") != std::string::npos || 
+            name.find("output") != std::string::npos) {
+            priority += 0.3f;
+        }
+        
+        // Adjust by layer depth (earlier layers slightly more important)
+        uint32_t layer = extract_layer_index(name);
+        if (layer < 4) {
+            priority += 0.1f;
+        }
+        
+        return std::min(1.0f, priority);
+    }
+
+    PackType classify_tensor_type(const std::string& name) const {
+        if (name.find("attn_q") != std::string::npos) return PackType::ATTENTION_Q;
+        if (name.find("attn_k") != std::string::npos) return PackType::ATTENTION_K;
+        if (name.find("attn_v") != std::string::npos) return PackType::ATTENTION_V;
+        if (name.find("attn_o") != std::string::npos || name.find("attn_output") != std::string::npos) 
+            return PackType::ATTENTION_O;
+        if (name.find("ffn_gate") != std::string::npos || name.find("ffn_up") != std::string::npos) 
+            return PackType::FEED_FORWARD_GATE;
+        if (name.find("ffn_down") != std::string::npos) return PackType::FEED_FORWARD_DOWN;
+        if (name.find("ffn_norm") != std::string::npos || name.find("attn_norm") != std::string::npos)
+            return PackType::NORM_GAMMA;
+        if (name.find("token_embd") != std::string::npos) return PackType::EMBEDDING;
+        if (name.find("output") != std::string::npos) return PackType::HEAD;
+        return PackType::UNKNOWN;
     }
 };
 
 // ============================================================================
-// Public API Implementation
+// GGUFLoader Public API Implementation
 // ============================================================================
 GGUFLoader::GGUFLoader(const Path& file_path)
-    : file_path_(file_path), pimpl_(std::make_unique<GGUFLoaderImpl>(file_path)) {}
+    : file_path_(file_path),
+      pimpl_(std::make_unique<GGUFLoaderImpl>(file_path)),
+      tensor_cache_(std::make_unique<TensorLRUCache>()),
+      thread_pool_(std::make_unique<WorkStealingThreadPool>()) {
+    tensor_reader_ = std::make_unique<StreamingTensorReader>(file_path, thread_pool_.get());
+}
 
 GGUFLoader::~GGUFLoader() = default;
 
 ExpectedVoid GGUFLoader::load() {
-    return pimpl_->load();
+    auto result = pimpl_->load();
+    if (result.has_value()) {
+        loaded_ = true;
+        version_ = pimpl_->version();
+    }
+    return result;
 }
 
 ExpectedVoid GGUFLoader::close() {
+    loaded_ = false;
     return pimpl_->close();
 }
 
+ModelConfig GGUFLoader::get_model_config() const {
+    return pimpl_->get_model_config();
+}
+
 std::vector<PackMetadata> GGUFLoader::generate_packs(const ModelConfig& config) {
-    (void)config;
-    return pimpl_->generate_packs();
+    return pimpl_->generate_packs(config);
 }
 
-uint64_t GGUFLoader::tensor_count() const {
-    return pimpl_->tensors().size();
+uint64 GGUFLoader::tensor_count() const {
+    return pimpl_->tensor_count();
 }
 
-uint64_t GGUFLoader::metadata_count() const {
-    return pimpl_->metadata().size();
+uint64 GGUFLoader::metadata_count() const {
+    return pimpl_->metadata_count();
 }
 
 const GGUFTensorInfo* GGUFLoader::get_tensor(const std::string& name) const {
-    for (const auto& tensor : pimpl_->tensors()) {
-        if (tensor.name == name) {
-            return &tensor;
-        }
-    }
-    return nullptr;
+    return pimpl_->get_tensor(name);
 }
 
-Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& tensor, bool fp16_to_fp32) {
+Expected<std::vector<float>> GGUFLoader::read_tensor_data(const GGUFTensorInfo& tensor, 
+                                                           bool fp16_to_fp32) {
     return pimpl_->read_tensor_data(tensor, fp16_to_fp32);
+}
+
+Expected<std::vector<float>> GGUFLoader::read_tensor_cached(const std::string& tensor_name,
+                                                             bool fp16_to_fp32) {
+    // Check cache first
+    std::vector<float> cached_data;
+    if (tensor_cache_->get(tensor_name, cached_data)) {
+        return cached_data;
+    }
+    
+    // Load from file
+    const auto* tensor = get_tensor(tensor_name);
+    if (!tensor) {
+        return -30;  // Tensor not found
+    }
+    
+    auto result = read_tensor_data(*tensor, fp16_to_fp32);
+    if (result.has_value()) {
+        // Add to cache
+        tensor_cache_->put(tensor_name, result.value(), *tensor);
+    }
+    
+    return result;
 }
 
 std::vector<Expected<std::vector<float>>> GGUFLoader::read_tensors_parallel(
     const std::vector<std::string>& tensor_names, bool fp16_to_fp32) {
-    return pimpl_->load_tensors_parallel(tensor_names, fp16_to_fp32);
+    
+    std::vector<Expected<std::vector<float>>> results(tensor_names.size());
+    
+    // First check cache for all tensors
+    std::vector<std::string> uncached_names;
+    std::vector<size_t> uncached_indices;
+    
+    for (size_t i = 0; i < tensor_names.size(); ++i) {
+        std::vector<float> cached;
+        if (tensor_cache_->get(tensor_names[i], cached)) {
+            results[i] = std::move(cached);
+        } else {
+            uncached_names.push_back(tensor_names[i]);
+            uncached_indices.push_back(i);
+        }
+    }
+    
+    // Load uncached tensors in parallel
+    if (!uncached_names.empty()) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(uncached_names.size());
+        
+        for (size_t i = 0; i < uncached_names.size(); ++i) {
+            futures.push_back(thread_pool_->enqueue([this, &uncached_names, &results, 
+                                                      &uncached_indices, i, fp16_to_fp32]() {
+                const auto* tensor = get_tensor(uncached_names[i]);
+                if (tensor) {
+                    auto result = read_tensor_data(*tensor, fp16_to_fp32);
+                    results[uncached_indices[i]] = std::move(result);
+                    
+                    // Cache successful loads
+                    if (results[uncached_indices[i]].has_value()) {
+                        tensor_cache_->put(uncached_names[i], 
+                                          results[uncached_indices[i]].value(), 
+                                          *tensor);
+                    }
+                } else {
+                    results[uncached_indices[i]] = -30;  // Not found
+                }
+            }));
+        }
+        
+        for (auto& f : futures) {
+            f.wait();
+        }
+    }
+    
+    return results;
+}
+
+std::vector<Expected<std::vector<float>>> GGUFLoader::stream_tensors_parallel(
+    const std::vector<std::string>& tensor_names,
+    uint32_t /*num_chunks*/) {
+    
+    // Use StreamingTensorReader for async multi-thread chunk processing
+    std::vector<StreamingTensorReader::ReadRequest> requests;
+    requests.reserve(tensor_names.size());
+    
+    for (const auto& name : tensor_names) {
+        const auto* tensor = get_tensor(name);
+        if (tensor) {
+            StreamingTensorReader::ReadRequest req;
+            req.file_offset = tensor->data_offset;
+            req.size = tensor->data_size;
+            req.tensor_name = name;
+            req.data_type = tensor->data_type;
+            req.dimensions = tensor->dimensions;
+            req.decompress = tensor->is_compressed;
+            requests.push_back(std::move(req));
+        }
+    }
+    
+    std::vector<Expected<std::vector<float>>> results;
+    results.reserve(tensor_names.size());
+    
+    std::mutex results_mutex;
+    std::condition_variable cv;
+    std::atomic<size_t> completed(0);
+    
+    tensor_reader_->read_tensors_async_batch(requests, 
+        [&](std::vector<StreamingTensorReader::ReadResult> read_results) {
+            std::lock_guard<std::mutex> lock(results_mutex);
+            for (auto& rr : read_results) {
+                if (rr.success) {
+                    results.push_back(std::move(rr.data));
+                } else {
+                    results.push_back(-40);  // Read error
+                }
+            }
+            completed.store(read_results.size());
+            cv.notify_one();
+        });
+    
+    // Wait for completion
+    std::unique_lock<std::mutex> lock(results_mutex);
+    cv.wait(lock, [&] { return completed.load() == requests.size(); });
+    
+    return results;
 }
 
 const std::vector<VocabularyEntry>& GGUFLoader::get_vocabulary() const {
-    return pimpl_->vocabulary();
+    return pimpl_->get_vocabulary();
+}
+
+const TokenizerConfig& GGUFLoader::get_tokenizer_config() const {
+    return pimpl_->get_tokenizer_config();
 }
 
 void GGUFLoader::clear_tensor_cache() {
-    pimpl_->clear_tensor_cache();
+    tensor_cache_->clear();
 }
 
 size_t GGUFLoader::get_tensor_cache_size() const {
-    return pimpl_->get_tensor_cache_size();
+    return tensor_cache_->get_stats().current_memory_bytes;
+}
+
+TensorLRUCache::Stats GGUFLoader::get_cache_stats() const {
+    return tensor_cache_->get_stats();
+}
+
+void GGUFLoader::configure_cache(const TensorCacheConfig& config) {
+    tensor_cache_ = std::make_unique<TensorLRUCache>(config);
 }
 
 ExpectedVoid GGUFLoader::add_shard(const Path& shard_path) {
-    return pimpl_->add_shard(shard_path);
+    // Multi-shard support - for now just log
+    std::cout << "[GGUFLoader] Shard support not fully implemented yet: " 
+              << shard_path.string() << std::endl;
+    return ExpectedVoid();
 }
 
 bool GGUFLoader::is_sharded() const {
-    return pimpl_->is_sharded();
+    return false;  // Not yet implemented
 }
 
-uint64_t GGUFLoader::align_offset(uint64_t offset, uint64_t alignment) {
-    if (alignment == 0) return offset;
-    return (offset + alignment - 1) / alignment * alignment;
+std::vector<std::string> GGUFLoader::get_tensor_names() const {
+    return pimpl_->get_tensor_names();
 }
 
-ModelConfig GGUFLoader::get_model_config() const {
-    return pimpl_->model_config();
+std::vector<std::string> GGUFLoader::get_metadata_keys() const {
+    return pimpl_->get_metadata_keys();
+}
+
+const GGUFMetadataKV* GGUFLoader::get_metadata(const std::string& key) const {
+    return pimpl_->get_metadata(key);
+}
+
+uint64 GGUFLoader::align_offset(uint64 offset, uint64 alignment) {
+    return (offset + alignment - 1) & ~(alignment - 1);
+}
+
+uint32_t GGUFLoader::get_version() const {
+    return version_;
+}
+
+bool GGUFLoader::is_valid() const {
+    return loaded_;
 }
 
 } // namespace vk_symbiote

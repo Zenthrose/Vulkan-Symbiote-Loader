@@ -14,6 +14,24 @@ namespace vk_symbiote {
 
 class ShaderRuntime;
 class Tokenizer;
+class KVCacheManager;
+class PowerManager;
+
+// Device capabilities for shader tuning
+struct DeviceCapabilities {
+    uint32_t max_compute_workgroup_invocations = 256;
+    uint32_t max_compute_workgroup_size[3] = {256, 1, 1};
+    uint32_t subgroup_size = 32;
+    uint32_t max_push_constant_size = 128;
+    uint32_t shared_memory_size = 16384;
+    bool supports_fp16 = false;
+    bool supports_int8 = false;
+    bool supports_cooperative_matrix = false;
+    uint32_t cooperative_matrix_m = 16;
+    uint32_t cooperative_matrix_n = 16;
+    uint32_t cooperative_matrix_k = 16;
+    uint32_t optimal_workgroup_size = 256;
+};
 
 // Benchmark result structure
 struct BenchmarkResult {
@@ -32,6 +50,23 @@ struct BenchmarkResult {
     
     std::unordered_map<std::string, double> power_mode_results;
     double memory_pressure_result = 0.0;
+};
+
+// Detailed benchmark statistics
+struct BenchmarkStats {
+    double avg_tokens_per_sec = 0.0;
+    double min_tokens_per_sec = 0.0;
+    double max_tokens_per_sec = 0.0;
+    double std_dev_tokens_per_sec = 0.0;
+    double avg_latency_ms = 0.0;
+    double peak_vram_gb = 0.0;
+    double avg_vram_usage_gb = 0.0;
+    double fragmentation_ratio = 0.0;
+    double cache_hit_rate = 0.0;
+    uint64_t total_evictions = 0;
+    double eviction_rate = 0.0;
+    
+    void print() const;
 };
 
 class VulkanSymbioteEngine {
@@ -54,6 +89,11 @@ public:
     BenchmarkResult run_benchmark(uint32_t warmup_tokens = 10, uint32_t benchmark_tokens = 100, 
                                    uint32_t iterations = 3);
     
+    // Detailed benchmark with full stats
+    struct BenchmarkStats run_benchmark_detailed(uint32_t warmup_tokens, 
+                                                  uint32_t benchmark_tokens,
+                                                  uint32_t iterations);
+    
     // Batched text generation
     std::vector<std::string> generate_text_batch(const std::vector<std::string>& prompts, 
                                                   uint32_t max_tokens_per_prompt = 256,
@@ -62,6 +102,10 @@ public:
     // Memory statistics
     MemoryPoolStats get_vram_stats();
     double get_peak_vram_usage();
+    
+    // KV Cache management
+    void clear_kv_cache();
+    size_t get_kv_cache_memory_usage() const;
 
 private:
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -81,6 +125,8 @@ private:
     std::unique_ptr<ShaderRuntime> shader_runtime_;
     std::unique_ptr<Tokenizer> tokenizer_;
     std::unique_ptr<GGUFLoader> gguf_loader_;
+    std::unique_ptr<KVCacheManager> kv_cache_manager_;
+    std::unique_ptr<PowerManager> power_manager_;
 
     std::vector<float> hidden_states_;
     std::vector<uint32_t> token_sequence_;
@@ -88,6 +134,7 @@ private:
     
     // Performance monitoring
     PerformanceMetrics performance_metrics_;
+    DeviceCapabilities device_caps_;
 
     ExpectedVoid initialize_vulkan();
     ExpectedVoid load_model();
@@ -97,6 +144,8 @@ private:
     Expected<std::vector<float>> embed_tokens(const std::vector<uint32_t>& tokens);
     Expected<std::vector<float>> forward_layer(const std::vector<float>& hidden, uint32_t layer_idx);
     Expected<std::vector<float>> attention(const std::vector<float>& hidden, uint32_t layer_idx);
+    Expected<std::vector<float>> attention_with_cache(const std::vector<float>& hidden, uint32_t layer_idx,
+                                                       const class KVCacheManager& kv_cache_mgr, uint32_t cache_idx);
     Expected<std::vector<float>> feed_forward(const std::vector<float>& hidden, uint32_t layer_idx);
     Expected<std::vector<float>> rms_norm(const std::vector<float>& hidden, uint32_t layer_idx);
     Expected<std::vector<float>> apply_rope(const std::vector<float>& hidden, uint32_t position);
@@ -107,6 +156,11 @@ private:
 
     ExpectedVoid upload_to_gpu(const std::vector<float>& data, VkBuffer buffer);
     ExpectedVoid download_from_gpu(VkBuffer buffer, std::vector<float>& data);
+    
+    // GPU helper methods
+    VkCommandBuffer begin_single_time_commands();
+    void end_single_time_commands(VkCommandBuffer cmd_buffer);
+    uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties);
     
     // Power management
     enum class PowerProfile { HIGH_PERFORMANCE, BALANCED, POWER_SAVER };
@@ -145,7 +199,7 @@ private:
     void check_battery_status();
     float read_battery_capacity();
     bool read_ac_connected();
-    
+
     // Benchmark helpers
     std::unordered_map<std::string, double> test_power_modes(uint32_t tokens);
     double test_memory_pressure(uint32_t tokens);
@@ -153,6 +207,16 @@ private:
     double calculate_mean(const std::vector<double>& samples);
     double calculate_std_dev(const std::vector<double>& samples);
     uint32_t sample_token(const std::vector<float>& logits, float temperature);
+    uint32_t greedy_sampling(const float* logits, uint32_t size);
+    void top_k_sampling(const float* logits, uint32_t vocab_size, uint32_t k, float temperature,
+                       std::vector<uint32_t>& tokens, std::vector<float>& probs, float* workspace);
+    
+    // KV cache helpers
+    void append_kv_cache(uint32_t layer_idx, const std::vector<float>& key, const std::vector<float>& value);
+    Expected<std::vector<float>> forward_layer_with_kv(const std::vector<float>& hidden, uint32_t layer_idx);
+    
+    // Time helpers
+    static uint64_t get_current_time_ns();
 };
 
 } // namespace vk_symbiote

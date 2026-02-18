@@ -111,12 +111,19 @@ bool ConfigManager::load_from_file(const Path& config_path) {
     parse_power_section_toml(toml_data_);
     parse_benchmark_section_toml(toml_data_);
     parse_codec_section_toml(toml_data_);
+    parse_batch_section_toml(toml_data_);
+    parse_vitality_section_toml(toml_data_);
+    parse_shader_section_toml(toml_data_);
     parse_model_section_toml(toml_data_);
     
     return validate_config();
 }
 
 bool ConfigManager::save_to_file(const Path& config_path) {
+    return save_to_toml(config_path);
+}
+
+bool ConfigManager::save_to_toml(const Path& config_path) {
     std::ofstream file(config_path.string());
     if (!file.is_open()) {
         std::cerr << "Failed to open config file for writing: " << config_path << std::endl;
@@ -124,7 +131,7 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     }
     
     file << "# Vulkan Symbiote Configuration\n";
-    file << "# Auto-generated configuration file\n\n";
+    file << "# Auto-generated on " << get_current_timestamp() << "\n\n";
     
     // Memory section
     file << "[memory]\n";
@@ -135,6 +142,8 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     file << "enable_compression = " << (memory_config_.enable_compression ? "true" : "false") << "\n";
     file << "compression_algorithm = \"" << memory_config_.compression_algorithm << "\"\n";
     file << "max_packs_in_memory = " << memory_config_.max_packs_in_memory << "\n";
+    file << "enable_defrag = " << (memory_config_.enable_defrag ? "true" : "false") << "\n";
+    file << "defrag_interval_ms = " << memory_config_.defrag_interval_ms << "\n";
     file << "\n";
     
     // Performance section
@@ -143,9 +152,12 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     file << "enable_profiling = " << (perf_config_.enable_profiling ? "true" : "false") << "\n";
     file << "workgroup_size_x = " << perf_config_.workgroup_size_x << "\n";
     file << "workgroup_size_y = " << perf_config_.workgroup_size_y << "\n";
+    file << "workgroup_size_z = " << perf_config_.workgroup_size_z << "\n";
     file << "use_subgroup_ops = " << (perf_config_.use_subgroup_ops ? "true" : "false") << "\n";
+    file << "subgroup_size = " << perf_config_.subgroup_size << "\n";
     file << "use_fp16_math = " << (perf_config_.use_fp16_math ? "true" : "false") << "\n";
     file << "scale_factor = " << perf_config_.scale_factor << "\n";
+    file << "thread_pool_size = " << perf_config_.thread_pool_size << "\n";
     file << "\n";
     
     // Logging section
@@ -156,18 +168,25 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     file << "log_performance = " << (logging_config_.log_performance ? "true" : "false") << "\n";
     file << "log_memory_usage = " << (logging_config_.log_memory_usage ? "true" : "false") << "\n";
     file << "max_log_file_size_mb = " << logging_config_.max_log_file_size_mb << "\n";
+    file << "log_to_console = " << (logging_config_.log_to_console ? "true" : "false") << "\n";
     file << "\n";
     
     // Power section
     file << "[power]\n";
+    file << "enable_power_management = " << (power_config_.enable_power_management ? "true" : "false") << "\n";
     file << "enable_power_saver = " << (power_config_.enable_power_saver ? "true" : "false") << "\n";
     file << "auto_detect_battery = " << (power_config_.auto_detect_battery ? "true" : "false") << "\n";
     file << "power_profile = " << power_config_.power_profile << "\n";
-    file << "battery_threshold_percent = " << power_config_.battery_threshold_percent << "\n";
+    file << "battery_threshold_low = " << power_config_.battery_threshold_low << "\n";
+    file << "battery_threshold_critical = " << power_config_.battery_threshold_critical << "\n";
     file << "throttle_on_thermal = " << (power_config_.throttle_on_thermal ? "true" : "false") << "\n";
+    file << "reduce_workgroup_on_battery = " << (power_config_.reduce_workgroup_on_battery ? "true" : "false") << "\n";
+    file << "min_workgroup_size_battery = " << power_config_.min_workgroup_size_battery << "\n";
+    file << "prefetch_reduction_factor = " << power_config_.prefetch_reduction_factor << "\n";
+    file << "disable_profiling_on_battery = " << (power_config_.disable_profiling_on_battery ? "true" : "false") << "\n";
+    file << "battery_threshold_percent = " << power_config_.battery_threshold_percent << "\n";
     file << "max_workgroup_size_battery = " << power_config_.max_workgroup_size_battery << "\n";
     file << "prefetch_lookahead_battery = " << power_config_.prefetch_lookahead_battery << "\n";
-    file << "disable_profiling_on_battery = " << (power_config_.disable_profiling_on_battery ? "true" : "false") << "\n";
     file << "\n";
     
     // Benchmark section
@@ -180,25 +199,79 @@ bool ConfigManager::save_to_file(const Path& config_path) {
     file << "output_file = \"" << benchmark_config_.output_file << "\"\n";
     file << "test_power_modes = " << (benchmark_config_.test_power_modes ? "true" : "false") << "\n";
     file << "test_memory_pressure = " << (benchmark_config_.test_memory_pressure ? "true" : "false") << "\n";
+    file << "detailed_layer_stats = " << (benchmark_config_.detailed_layer_stats ? "true" : "false") << "\n";
     file << "\n";
     
     // Codec section
     file << "[codec]\n";
+    file << "codec = \"" << codec_config_.codec << "\"\n";
+    file << "compression_level = " << codec_config_.compression_level << "\n";
+    file << "enable_blosc2 = " << (codec_config_.enable_blosc2 ? "true" : "false") << "\n";
+    file << "blosc2_compressor = \"" << codec_config_.blosc2_compressor << "\"\n";
+    file << "blosc2_shuffle = " << (codec_config_.blosc2_shuffle ? "true" : "false") << "\n";
+    file << "enable_zfp = " << (codec_config_.enable_zfp ? "true" : "false") << "\n";
+    file << "zfp_precision = " << codec_config_.zfp_precision << "\n";
+    file << "zfp_rate = " << codec_config_.zfp_rate << "\n";
+    file << "enable_hybrid = " << (codec_config_.enable_hybrid ? "true" : "false") << "\n";
+    file << "hybrid_mode = \"" << codec_config_.hybrid_mode << "\"\n";
+    file << "decompression_threads = " << codec_config_.decompression_threads << "\n";
     file << "enable_compression = " << (codec_config_.enable_compression ? "true" : "false") << "\n";
     file << "algorithm = \"" << codec_config_.algorithm << "\"\n";
-    file << "compression_level = " << codec_config_.compression_level << "\n";
-    file << "decompression_threads = " << codec_config_.decompression_threads << "\n";
-    file << "enable_blosc2 = " << (codec_config_.enable_blosc2 ? "true" : "false") << "\n";
-    file << "enable_zfp = " << (codec_config_.enable_zfp ? "true" : "false") << "\n";
     file << "hybrid_compression_ratio = " << codec_config_.hybrid_compression_ratio << "\n";
+    file << "\n";
+    
+    // Batch section
+    file << "[batch]\n";
+    file << "enable_batching = " << (batch_config_.enable_batching ? "true" : "false") << "\n";
+    file << "max_batch_size = " << batch_config_.max_batch_size << "\n";
+    file << "dynamic_batch_size = " << (batch_config_.dynamic_batch_size ? "true" : "false") << "\n";
+    file << "batch_timeout_ms = " << batch_config_.batch_timeout_ms << "\n";
+    file << "prefetch_for_batch = " << (batch_config_.prefetch_for_batch ? "true" : "false") << "\n";
+    file << "share_kv_cache = " << (batch_config_.share_kv_cache ? "true" : "false") << "\n";
+    file << "max_sequence_length = " << batch_config_.max_sequence_length << "\n";
+    file << "\n";
+    
+    // Vitality section
+    file << "[vitality]\n";
+    file << "enabled = " << (vitality_config_.enabled ? "true" : "false") << "\n";
+    file << "learning_rate = " << vitality_config_.learning_rate << "\n";
+    file << "momentum = " << vitality_config_.momentum << "\n";
+    file << "use_adam = " << (vitality_config_.use_adam ? "true" : "false") << "\n";
+    file << "model_path = \"" << vitality_config_.model_path << "\"\n";
+    file << "\n";
+    
+    // Shader section
+    file << "[shader]\n";
+    file << "cache_dir = \"" << shader_config_.cache_dir << "\"\n";
+    file << "enable_cache = " << (shader_config_.enable_cache ? "true" : "false") << "\n";
+    file << "use_cooperative_matrix = " << (shader_config_.use_cooperative_matrix ? "true" : "false") << "\n";
+    file << "coop_matrix_m = " << shader_config_.coop_matrix_m << "\n";
+    file << "coop_matrix_n = " << shader_config_.coop_matrix_n << "\n";
+    file << "coop_matrix_k = " << shader_config_.coop_matrix_k << "\n";
+    file << "auto_tune = " << (shader_config_.auto_tune ? "true" : "false") << "\n";
+    file << "tuning_file = \"" << shader_config_.tuning_file << "\"\n";
     file << "\n";
     
     // Model section
     file << "[model]\n";
     file << "model_path = \"" << model_path_ << "\"\n";
+    file << "model_type = \"" << model_type_ << "\"\n";
     
     std::cout << "Configuration saved to: " << config_path << std::endl;
     return file.good();
+}
+
+bool ConfigManager::load_from_toml(const Path& config_path) {
+    // load_from_file already handles TOML format
+    return load_from_file(config_path);
+}
+
+std::string ConfigManager::get_current_timestamp() const {
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
+    return ss.str();
 }
 
 void ConfigManager::parse_memory_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc) {
@@ -475,6 +548,122 @@ void ConfigManager::parse_model_section_toml(const std::unordered_map<std::strin
             model_path_ = std::get<std::string>(kv->second);
         }
     }
+}
+
+void ConfigManager::parse_batch_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc) {
+    auto it = doc.find("batch");
+    if (it == doc.end()) return;
+    
+    const auto& table = it->second;
+    
+    auto get_bool = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<bool>(kv->second)) {
+                target = std::get<bool>(kv->second);
+            }
+        }
+    };
+    
+    auto get_int = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<int64_t>(kv->second)) {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(std::get<int64_t>(kv->second));
+            }
+        }
+    };
+    
+    get_bool("enable_batching", batch_config_.enable_batching);
+    get_int("max_batch_size", batch_config_.max_batch_size);
+    get_bool("dynamic_batch_size", batch_config_.dynamic_batch_size);
+    get_int("batch_timeout_ms", batch_config_.batch_timeout_ms);
+    get_bool("prefetch_for_batch", batch_config_.prefetch_for_batch);
+    get_bool("share_kv_cache", batch_config_.share_kv_cache);
+    get_int("max_sequence_length", batch_config_.max_sequence_length);
+}
+
+void ConfigManager::parse_vitality_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc) {
+    auto it = doc.find("vitality");
+    if (it == doc.end()) return;
+    
+    const auto& table = it->second;
+    
+    auto get_bool = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<bool>(kv->second)) {
+                target = std::get<bool>(kv->second);
+            }
+        }
+    };
+
+    auto get_float = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<double>(kv->second)) {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(std::get<double>(kv->second));
+            }
+        }
+    };
+
+    auto get_string = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<std::string>(kv->second)) {
+                target = std::get<std::string>(kv->second);
+            }
+        }
+    };
+
+    get_bool("enabled", vitality_config_.enabled);
+    get_float("learning_rate", vitality_config_.learning_rate);
+    get_float("momentum", vitality_config_.momentum);
+    get_bool("use_adam", vitality_config_.use_adam);
+    get_string("model_path", vitality_config_.model_path);
+}
+
+void ConfigManager::parse_shader_section_toml(const std::unordered_map<std::string, std::unordered_map<std::string, std::variant<int64_t, double, bool, std::string>>>& doc) {
+    auto it = doc.find("shader");
+    if (it == doc.end()) return;
+    
+    const auto& table = it->second;
+    
+    auto get_bool = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<bool>(kv->second)) {
+                target = std::get<bool>(kv->second);
+            }
+        }
+    };
+    
+    auto get_int = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<int64_t>(kv->second)) {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(std::get<int64_t>(kv->second));
+            }
+        }
+    };
+    
+    auto get_string = [&](const std::string& key, auto& target) {
+        auto kv = table.find(key);
+        if (kv != table.end()) {
+            if (std::holds_alternative<std::string>(kv->second)) {
+                target = std::get<std::string>(kv->second);
+            }
+        }
+    };
+    
+    get_string("cache_dir", shader_config_.cache_dir);
+    get_bool("enable_cache", shader_config_.enable_cache);
+    get_bool("use_cooperative_matrix", shader_config_.use_cooperative_matrix);
+    get_int("coop_matrix_m", shader_config_.coop_matrix_m);
+    get_int("coop_matrix_n", shader_config_.coop_matrix_n);
+    get_int("coop_matrix_k", shader_config_.coop_matrix_k);
+    get_bool("auto_tune", shader_config_.auto_tune);
+    get_string("tuning_file", shader_config_.tuning_file);
 }
 
 void ConfigManager::load_from_args(int argc, char* argv[]) {

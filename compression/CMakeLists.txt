@@ -81,6 +81,8 @@ if(BLOSC2_ENABLED)
         target_include_directories(compression_backends PRIVATE ${BLOSC2_INCLUDE_DIRS})
         target_link_libraries(compression_backends PUBLIC ${BLOSC2_LIBRARIES})
     endif()
+    # Also link with the actual library for transitive dependencies
+    target_link_libraries(compression_backends PUBLIC blosc2)
 endif()
 
 if(ZFP_ENABLED)

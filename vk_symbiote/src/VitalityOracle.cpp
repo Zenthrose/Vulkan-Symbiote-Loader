@@ -691,7 +691,7 @@ struct LSTMCell {
         const uint32_t total_input = INPUT_SIZE + HIDDEN_SIZE;
         
         // Xavier/Glorot initialization
-        auto init_gate = [&](std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& gate, float bias_init = 0.0f) {
+        auto init_gate = [&](std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& gate, float /*bias_init*/ = 0.0f) {
             float xavier_scale = std::sqrt(2.0f / (HIDDEN_SIZE + total_input));
             std::normal_distribution<float> dist(0.0f, xavier_scale);
             for (auto& w : gate) w = dist(rng_);
@@ -1249,7 +1249,7 @@ public:
         return score;
     }
     
-    std::vector<uint64_t> predict_next_packs(const std::vector<uint32_t>& tokens,
+    std::vector<uint64_t> predict_next_packs(const std::vector<uint32_t>& /*tokens*/,
                                              uint32_t current_layer, uint32_t lookahead, uint32_t count) {
         std::vector<std::pair<uint64_t, float>> scored_packs;
         
@@ -1869,6 +1869,14 @@ void VitalityOracle::enable_sgd_training(bool enable) {
 
 void VitalityOracle::enable_adam_training(bool enable) {
     pimpl_->enable_adam(enable);
+}
+
+void VitalityOracle::set_momentum(float momentum) {
+    pimpl_->set_momentum(momentum);
+}
+
+float VitalityOracle::get_momentum() const {
+    return pimpl_->get_momentum();
 }
 
 uint32_t VitalityOracle::get_training_steps() const {
