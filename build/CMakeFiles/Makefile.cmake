@@ -11,7 +11,13 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeSystem.cmake"
   "/media/michael/external/Vulkan-Symbiote-Loader/compression/CMakeLists.txt"
+  "/media/michael/external/Vulkan-Symbiote-Loader/examples/CMakeLists.txt"
   "/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/CMakeLists.txt"
+  "/usr/lib/x86_64-linux-gnu/cmake/Blosc2/Blosc2Config.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/Blosc2/Blosc2ConfigVersion.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/Blosc2/Blosc2Targets-relwithdebinfo.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/Blosc2/Blosc2Targets.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/Blosc2/Modules/FindLZ4.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCXXCompiler.cmake.in"
   "/usr/share/cmake-3.28/Modules/CMakeCXXCompilerABI.cpp"
   "/usr/share/cmake-3.28/Modules/CMakeCXXInformation.cmake"
@@ -24,6 +30,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeDetermineSystem.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeFindBinUtils.cmake"
+  "/usr/share/cmake-3.28/Modules/CMakeFindDependencyMacro.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeGenericSystem.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeInitializeConfigs.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeLanguageInformation.cmake"
@@ -36,6 +43,9 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/CMakeTestCXXCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeTestCompilerCommon.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeUnixFindMake.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckIncludeFileCXX.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckLibraryExists.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ADSP-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ARMCC-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ARMClang-DetermineCompiler.cmake"
@@ -81,8 +91,10 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/Compiler/zOS-CXX-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageMessage.cmake"
-  "/usr/share/cmake-3.28/Modules/FindPkgConfig.cmake"
+  "/usr/share/cmake-3.28/Modules/FindThreads.cmake"
   "/usr/share/cmake-3.28/Modules/FindVulkan.cmake"
+  "/usr/share/cmake-3.28/Modules/FindZLIB.cmake"
+  "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake"
   "/usr/share/cmake-3.28/Modules/Internal/FeatureTesting.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Determine-CXX.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-GNU-CXX.cmake"
@@ -90,6 +102,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Initialize.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/UnixPaths.cmake"
+  "/usr/share/cmake-3.28/Modules/SelectLibraryConfigurations.cmake"
   )
 
 # The corresponding makefile is:
@@ -106,6 +119,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   "compression/CMakeFiles/CMakeDirectoryInformation.cmake"
   "vk_symbiote/CMakeFiles/CMakeDirectoryInformation.cmake"
+  "examples/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
@@ -114,4 +128,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "vk_symbiote/CMakeFiles/vk_symbiote.dir/DependInfo.cmake"
   "vk_symbiote/CMakeFiles/vk_symbiote_example.dir/DependInfo.cmake"
   "vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/DependInfo.cmake"
+  "examples/CMakeFiles/benchmark_example.dir/DependInfo.cmake"
   )

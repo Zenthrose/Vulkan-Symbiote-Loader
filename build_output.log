@@ -1,0 +1,401 @@
+[  5%] Building CXX object compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o
+[ 10%] Building CXX object compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o
+[ 15%] Building CXX object compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o
+[ 20%] Linking CXX static library libcompression_backends.a
+[ 20%] Built target compression_backends
+[ 25%] Building CXX object vk_symbiote/CMakeFiles/vk_symbiote.dir/src/VitalityOracle.cpp.o
+[ 35%] Building CXX object vk_symbiote/CMakeFiles/vk_symbiote.dir/src/VulkanSymbioteEngine.cpp.o
+[ 40%] Building CXX object vk_symbiote/CMakeFiles/vk_symbiote.dir/src/NomadPack.cpp.o
+[ 40%] Building CXX object vk_symbiote/CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:692:62: warning: missing terminating " character
+  692 |     coopmat<float, gl_ScopeSubgroup, )" << M << ", " << K << ", gl_MatrixUseA> matA;
+      |                                                              ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:692:62: error: missing terminating " character
+  692 |     coopmat<float, gl_ScopeSubgroup, )" << M << ", " << K << ", gl_MatrixUseA> matA;
+      |                                                              ^~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:244:8: error: redefinition of ‘struct vk_symbiote::BenchmarkStats’
+  244 | struct BenchmarkStats {
+      |        ^~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In member function ‘void vk_symbiote::CooperativeMatrixManager::query_capabilities()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:215:22: error: ‘const struct VkCooperativeMatrixPropertiesKHR’ has no member named ‘Atype’; did you mean ‘AType’?
+  215 |             if (prop.Atype == VK_COMPONENT_TYPE_FLOAT16_KHR) {
+      |                      ^~~~~
+      |                      AType
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:259:8: error: redefinition of ‘struct vk_symbiote::TuningConfig’
+  259 | struct TuningConfig {
+      |        ^~~~~~~~~~~~
+In file included from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:2:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:56:8: note: previous definition of ‘struct vk_symbiote::BenchmarkStats’
+   56 | struct BenchmarkStats {
+      |        ^~~~~~~~~~~~~~
+In file included from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:2:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/ShaderRuntime.h:27:8: note: previous definition of ‘struct vk_symbiote::TuningConfig’
+   27 | struct TuningConfig {
+      |        ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In member function ‘vk_symbiote::TuningConfig vk_symbiote::AutoTuner::auto_tune_full()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:412:41: error: ‘VkPhysicalDeviceLimits’ {aka ‘struct VkPhysicalDeviceLimits’} has no member named ‘shaderFloat64’
+  412 |         config.use_fp16 = (props.limits.shaderFloat64 != 0) &&
+      |                                         ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In member function ‘double vk_symbiote::AutoTuner::benchmark_workgroup(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:444:66: warning: unused parameter ‘m’ [-Wunused-parameter]
+  444 |     double benchmark_workgroup(uint32_t workgroup_size, uint32_t m, uint32_t n, uint32_t k, uint32_t iterations) {
+      |                                                         ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:444:78: warning: unused parameter ‘n’ [-Wunused-parameter]
+  444 |     double benchmark_workgroup(uint32_t workgroup_size, uint32_t m, uint32_t n, uint32_t k, uint32_t iterations) {
+      |                                                                     ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:444:90: warning: unused parameter ‘k’ [-Wunused-parameter]
+  444 |     double benchmark_workgroup(uint32_t workgroup_size, uint32_t m, uint32_t n, uint32_t k, uint32_t iterations) {
+      |                                                                                 ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:444:102: warning: unused parameter ‘iterations’ [-Wunused-parameter]
+  444 |     double benchmark_workgroup(uint32_t workgroup_size, uint32_t m, uint32_t n, uint32_t k, uint32_t iterations) {
+      |                                                                                             ~~~~~~~~~^~~~~~~~~~
+In file included from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:26:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h: In member function ‘virtual bool compression::Blosc2Compression::compress(const void*, size_t, std::vector<unsigned char>&)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:35: warning: unused parameter ‘src’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                       ~~~~~~~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:47: warning: unused parameter ‘src_size’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                                        ~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:20:79: warning: unused parameter ‘out’ [-Wunused-parameter]
+   20 |         bool compress(const void* src, size_t src_size, std::vector<uint8_t>& out) override { return false; }
+      |                                                         ~~~~~~~~~~~~~~~~~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h: In member function ‘virtual bool compression::Blosc2Compression::decompress(const uint8_t*, size_t, size_t, void*)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:40: warning: unused parameter ‘src_data’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                         ~~~~~~~~~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:57: warning: unused parameter ‘src_size’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                  ~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:74: warning: unused parameter ‘decompressed_size’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                                   ~~~~~~~^~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h:21:99: warning: unused parameter ‘dst’ [-Wunused-parameter]
+   21 |         bool decompress(const uint8_t* src_data, size_t src_size, size_t decompressed_size, void* dst) override { return false; }
+      |                                                                                             ~~~~~~^~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::VulkanSymbioteEngine::initialize_vulkan()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:357:11: warning: unused variable ‘config’ [-Wunused-variable]
+  357 |     auto& config = ConfigManager::instance();
+      |           ^~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VitalityOracle.cpp: In lambda function:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VitalityOracle.cpp:694:103: warning: unused parameter ‘bias_init’ [-Wunused-parameter]
+  694 |         auto init_gate = [&](std::array<float, HIDDEN_SIZE * (INPUT_SIZE + HIDDEN_SIZE)>& gate, float bias_init = 0.0f) {
+      |                                                                                                 ~~~~~~^~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘std::string vk_symbiote::VulkanSymbioteEngine::generate(const std::string&, uint32_t, float)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:518:14: warning: unused variable ‘start_time’ [-Wunused-variable]
+  518 |     uint64_t start_time = get_current_time_ns();
+      |              ^~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::forward_layer_with_kv(const std::vector<float>&, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:612:69: error: cannot convert ‘const vk_symbiote::KVCacheManager::KVCacheEntry’ to ‘const vk_symbiote::KVCacheEntry&’
+  612 |     auto attn_out = attention_with_cache(normed.value(), layer_idx, kv_cache);
+      |                                                                     ^~~~~~~~
+      |                                                                     |
+      |                                                                     const vk_symbiote::KVCacheManager::KVCacheEntry
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:148:83: note:   initializing argument 3 of ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::attention_with_cache(const std::vector<float>&, uint32_t, const vk_symbiote::KVCacheEntry&)’
+  148 |                                                        const struct KVCacheEntry& kv_cache);
+      |                                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:625:30: error: no declaration matches ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::attention_with_cache(const std::vector<float>&, uint32_t, const vk_symbiote::KVCacheManager::KVCacheEntry&)’
+  625 | Expected<std::vector<float>> VulkanSymbioteEngine::attention_with_cache(
+      |                              ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:147:34: note: candidate is: ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::attention_with_cache(const std::vector<float>&, uint32_t, const vk_symbiote::KVCacheEntry&)’
+  147 |     Expected<std::vector<float>> attention_with_cache(const std::vector<float>& hidden, uint32_t layer_idx,
+      |                                  ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:72:7: note: ‘class vk_symbiote::VulkanSymbioteEngine’ defined here
+   72 | class VulkanSymbioteEngine {
+      |       ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::BenchmarkStats vk_symbiote::VulkanSymbioteEngine::run_benchmark_detailed(uint32_t, uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:763:28: error: ‘class vk_symbiote::PackManager’ has no member named ‘clear_cache’
+  763 |             pack_manager_->clear_cache();
+      |                            ^~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In member function ‘std::string vk_symbiote::ShaderRuntime::generate_cooperative_matmul_shader_fp32()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:693:20: error: ‘gl_ScopeSubgroup’ was not declared in this scope
+  693 |     coopmat<float, gl_ScopeSubgroup, )" << K << ", " << N << ", gl_MatrixUseB> matB;
+      |                    ^~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::attention(const std::vector<float>&, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:990:105: warning: unused parameter ‘layer_idx’ [-Wunused-parameter]
+  990 | Expected<std::vector<float>> VulkanSymbioteEngine::attention(const std::vector<float>& hidden, uint32_t layer_idx) {
+      |                                                                                                ~~~~~~~~~^~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::feed_forward(const std::vector<float>&, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1058:108: warning: unused parameter ‘layer_idx’ [-Wunused-parameter]
+ 1058 | Expected<std::vector<float>> VulkanSymbioteEngine::feed_forward(const std::vector<float>& hidden, uint32_t layer_idx) {
+      |                                                                                                   ~~~~~~~~~^~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::rms_norm(const std::vector<float>&, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1117:104: warning: unused parameter ‘layer_idx’ [-Wunused-parameter]
+ 1117 | Expected<std::vector<float>> VulkanSymbioteEngine::rms_norm(const std::vector<float>& hidden, uint32_t layer_idx) {
+      |                                                                                               ~~~~~~~~~^~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: In member function ‘vk_symbiote::Expected<std::vector<float> > vk_symbiote::VulkanSymbioteEngine::apply_rope(const std::vector<float>&, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1176:106: warning: unused parameter ‘position’ [-Wunused-parameter]
+ 1176 | Expected<std::vector<float>> VulkanSymbioteEngine::apply_rope(const std::vector<float>& hidden, uint32_t position) {
+      |                                                                                                 ~~~~~~~~~^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:693:5: error: ‘coopmat’ was not declared in this scope
+  693 |     coopmat<float, gl_ScopeSubgroup, )" << K << ", " << N << ", gl_MatrixUseB> matB;
+      |     ^~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:693:13: error: expected primary-expression before ‘float’
+  693 |     coopmat<float, gl_ScopeSubgroup, )" << K << ", " << N << ", gl_MatrixUseB> matB;
+      |             ^~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:694:13: error: expected primary-expression before ‘float’
+  694 |     coopmat<float, gl_ScopeSubgroup, )" << M << ", " << N << ", gl_MatrixUseAccumulator> matC;
+      |             ^~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:17: error: ‘matC’ was not declared in this scope
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                 ^~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:23: error: ‘c’ was not declared in this scope
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                       ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VitalityOracle.cpp: In member function ‘std::vector<long unsigned int> vk_symbiote::VitalityOracleImpl::predict_next_packs(const std::vector<unsigned int>&, uint32_t, uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VitalityOracle.cpp:1252:75: warning: unused parameter ‘tokens’ [-Wunused-parameter]
+ 1252 |     std::vector<uint64_t> predict_next_packs(const std::vector<uint32_t>& tokens,
+      |                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1776:6: error: redefinition of ‘void vk_symbiote::VulkanSymbioteEngine::set_prefetch_lookahead(uint32_t)’
+ 1776 | void VulkanSymbioteEngine::set_prefetch_lookahead(uint32_t layers) {
+      |      ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:177:10: note: ‘void vk_symbiote::VulkanSymbioteEngine::set_prefetch_lookahead(uint32_t)’ previously defined here
+  177 |     void set_prefetch_lookahead(uint32_t layers) { prefetch_lookahead_ = layers; }
+      |          ^~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1780:10: error: redefinition of ‘uint32_t vk_symbiote::VulkanSymbioteEngine::get_prefetch_lookahead() const’
+ 1780 | uint32_t VulkanSymbioteEngine::get_prefetch_lookahead() const noexcept {
+      |          ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:178:14: note: ‘uint32_t vk_symbiote::VulkanSymbioteEngine::get_prefetch_lookahead() const’ previously defined here
+  178 |     uint32_t get_prefetch_lookahead() const noexcept { return prefetch_lookahead_; }
+      |              ^~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1784:6: error: redefinition of ‘void vk_symbiote::VulkanSymbioteEngine::enable_profiling(bool)’
+ 1784 | void VulkanSymbioteEngine::enable_profiling(bool enable) {
+      |      ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:179:10: note: ‘void vk_symbiote::VulkanSymbioteEngine::enable_profiling(bool)’ previously defined here
+  179 |     void enable_profiling(bool enable) { profiling_enabled_ = enable; }
+      |          ^~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/VulkanSymbioteEngine.cpp:1788:6: error: redefinition of ‘bool vk_symbiote::VulkanSymbioteEngine::is_profiling_enabled() const’
+ 1788 | bool VulkanSymbioteEngine::is_profiling_enabled() const noexcept {
+      |      ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h:180:10: note: ‘bool vk_symbiote::VulkanSymbioteEngine::is_profiling_enabled() const’ previously defined here
+  180 |     bool is_profiling_enabled() const noexcept { return profiling_enabled_; }
+      |          ^~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:26: error: ‘gl_GlobalInvocationID’ was not declared in this scope
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                          ^~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:52: error: ‘pc’ was not declared in this scope
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                                                    ^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:91: error: expected primary-expression before ‘)’ token
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                                                                                           ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In constructor ‘vk_symbiote::MultiQueueManager::MultiQueueManager(VkDevice, VkPhysicalDevice)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:270:31: error: use of deleted function ‘vk_symbiote::MultiQueueManager::QueueFamily& vk_symbiote::MultiQueueManager::QueueFamily::operator=(const vk_symbiote::MultiQueueManager::QueueFamily&)’
+  270 |             transfer_queue_ = compute_queue_;
+      |                               ^~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:224:12: note: ‘vk_symbiote::MultiQueueManager::QueueFamily& vk_symbiote::MultiQueueManager::QueueFamily::operator=(const vk_symbiote::MultiQueueManager::QueueFamily&)’ is implicitly deleted because the default definition would be ill-formed:
+  224 |     struct QueueFamily {
+      |            ^~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:224:12: error: use of deleted function ‘std::mutex& std::mutex::operator=(const std::mutex&)’
+In file included from /usr/include/c++/13/bits/atomic_wait.h:50,
+                 from /usr/include/c++/13/bits/atomic_base.h:42,
+                 from /usr/include/c++/13/bits/shared_ptr_atomic.h:33,
+                 from /usr/include/c++/13/memory:81,
+                 from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/Common.h:7,
+                 from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/NomadPack.h:3,
+                 from /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:4:
+/usr/include/c++/13/bits/std_mutex.h:108:12: note: declared here
+  108 |     mutex& operator=(const mutex&) = delete;
+      |            ^~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:273:30: error: use of deleted function ‘vk_symbiote::MultiQueueManager::QueueFamily& vk_symbiote::MultiQueueManager::QueueFamily::operator=(const vk_symbiote::MultiQueueManager::QueueFamily&)’
+  273 |             compute_queue_ = transfer_queue_;
+      |                              ^~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:287:38: error: use of deleted function ‘vk_symbiote::MultiQueueManager::QueueFamily& vk_symbiote::MultiQueueManager::QueueFamily::operator=(const vk_symbiote::MultiQueueManager::QueueFamily&)’
+  287 |                     compute_queue_ = transfer_queue_;
+      |                                      ^~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘uint64_t vk_symbiote::MultiQueueManager::submit_transfer(VkCommandBuffer, const std::string&)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:334:68: error: lvalue required as unary ‘&’ operand
+  334 |             submit.pSignalSemaphores = &timeline_mgr_.get_semaphore();
+      |                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘uint64_t vk_symbiote::MultiQueueManager::submit_compute_wait_transfer(VkCommandBuffer, uint64_t, const std::string&)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:372:66: error: lvalue required as unary ‘&’ operand
+  372 |             submit.pWaitSemaphores = &timeline_mgr_.get_semaphore();
+      |                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:375:68: error: lvalue required as unary ‘&’ operand
+  375 |             submit.pSignalSemaphores = &timeline_mgr_.get_semaphore();
+      |                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:385:68: error: lvalue required as unary ‘&’ operand
+  385 |             submit.pSignalSemaphores = &timeline_mgr_.get_semaphore();
+      |                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:697:5: error: ‘coopmatLoad’ was not declared in this scope
+  697 |     coopmatLoad(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |     ^~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:700:43: error: expected primary-expression before ‘)’ token
+  700 |     for (uint k = 0; k < pc.K_total; k += )" << K << R"() {
+      |                                           ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:700:56: error: expression cannot be used as a function
+  700 |     for (uint k = 0; k < pc.K_total; k += )" << K << R"() {
+      |                                            ~~~~~~~~~~~~^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:706:92: error: expected primary-expression before ‘)’ token
+  706 |     coopmatStore(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << R"(, pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |                                                                                            ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:532:7: error: redefinition of ‘class vk_symbiote::FractalMemoryAllocator’
+  532 | class FractalMemoryAllocator {
+      |       ^~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/NomadPack.h:57:7: note: previous definition of ‘class vk_symbiote::FractalMemoryAllocator’
+   57 | class FractalMemoryAllocator {
+      |       ^~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:706:5: error: ‘coopmatStore’ was not declared in this scope
+  706 |     coopmatStore(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * )" << N << R"(, pc.N_total, gl_CooperativeMatrixLayoutRowMajor);
+      |     ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::NomadPack::load_to_vram_timeline(VkCommandBuffer, VkDeviceSize, VkBuffer, VkDeviceSize)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1042:16: error: ‘load_to_vram_sync’ was not declared in this scope; did you mean ‘load_to_vram’?
+ 1042 |         return load_to_vram_sync(src_buffer, size);
+      |                ^~~~~~~~~~~~~~~~~
+      |                load_to_vram
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:708:5: error: ‘ss’ does not name a type
+  708 |     ss << "    coopmatStore(matC, c, gl_GlobalInvocationID.x * pc.N_total + gl_GlobalInvocationID.y * " << N << ", pc.N_total, gl_CooperativeMatrixLayoutRowMajor);\n";
+      |     ^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:709:5: error: ‘ss’ does not name a type
+  709 |     ss << "}\n";
+      |     ^~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:711:5: error: expected unqualified-id before ‘return’
+  711 |     return ss.str();
+      |     ^~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:715:12: error: ‘ShaderRuntime’ has not been declared
+  715 | VkPipeline ShaderRuntime::create_cooperative_matmul_pipeline() {
+      |            ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::PackManager::load_pack_with_timeline(uint64_t, VkCommandBuffer, VkBuffer, VkDeviceSize)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1177:11: error: ‘vk_symbiote::BufferRegion vk_symbiote::NomadPack::vram_region_’ is private within this context
+ 1177 |     pack->vram_region_ = region;
+      |           ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/NomadPack.h:156:18: note: declared private here
+  156 |     BufferRegion vram_region_;
+      |                  ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In function ‘VkPipeline_T* create_cooperative_matmul_pipeline()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:716:10: error: ‘device_caps_’ was not declared in this scope
+  716 |     if (!device_caps_.supports_cooperative_matrix) {
+      |          ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::NomadPack::load_to_ram()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1231:24: error: ‘device_’ was not declared in this scope; did you mean ‘VkDevice_T’?
+ 1231 |         vkCreateBuffer(device_, &buffer_info, nullptr, &staging_buffer);
+      |                        ^~~~~~~
+      |                        VkDevice_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:720:33: error: ‘generate_cooperative_matmul_shader_fp32’ was not declared in this scope
+  720 |     std::string shader_source = generate_cooperative_matmul_shader_fp32();
+      |                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1239:38: error: ‘find_memory_type’ was not declared in this scope
+ 1239 |         alloc_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+      |                                      ^~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:722:26: error: ‘compile_glsl_to_spirv’ was not declared in this scope
+  722 |     auto shader_result = compile_glsl_to_spirv(shader_source, {});
+      |                          ^~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:730:28: error: ‘pipeline_layout_’ was not declared in this scope; did you mean ‘VkPipelineLayout_T’?
+  730 |     pipeline_info.layout = pipeline_layout_;
+      |                            ^~~~~~~~~~~~~~~~
+      |                            VkPipelineLayout_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:741:48: error: ‘device_’ was not declared in this scope; did you mean ‘VkDevice_T’?
+  741 |     VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &pipeline_info, nullptr, &pipeline);
+      |                                                ^~~~~~~
+      |                                                VkDevice_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:741:57: error: ‘pipeline_cache_’ was not declared in this scope; did you mean ‘VkPipelineCache_T’?
+  741 |     VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &pipeline_info, nullptr, &pipeline);
+      |                                                         ^~~~~~~~~~~~~~~
+      |                                                         VkPipelineCache_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:755:12: error: ‘ShaderRuntime’ has not been declared
+  755 | VkPipeline ShaderRuntime::get_tuned_matmul_pipeline(uint32_t m, uint32_t n, uint32_t k) {
+      |            ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1246:38: error: ‘begin_single_time_commands’ was not declared in this scope
+ 1246 |         VkCommandBuffer cmd_buffer = begin_single_time_commands();
+      |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In function ‘VkPipeline_T* get_tuned_matmul_pipeline(uint32_t, uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:757:9: error: ‘device_caps_’ was not declared in this scope
+  757 |     if (device_caps_.supports_cooperative_matrix && m >= 1024 && n >= 1024) {
+      |         ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:766:33: error: ‘generate_tuned_matmul_shader’ was not declared in this scope
+  766 |     std::string shader_source = generate_tuned_matmul_shader(m, n, k);
+      |                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1252:9: error: ‘end_single_time_commands’ was not declared in this scope
+ 1252 |         end_single_time_commands(cmd_buffer);
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1257:21: error: cannot convert ‘uint8_t*’ {aka ‘unsigned char*’} to ‘float*’ in assignment
+ 1257 |         ram_data_ = new uint8_t[vram_region_.size];
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                     |
+      |                     uint8_t* {aka unsigned char*}
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:768:26: error: ‘compile_glsl_to_spirv’ was not declared in this scope
+  768 |     auto shader_result = compile_glsl_to_spirv(shader_source, {});
+      |                          ^~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘vk_symbiote::ExpectedVoid vk_symbiote::NomadPack::unload_from_vram()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1298:26: error: ‘vma_’ was not declared in this scope
+ 1298 |         vmaDestroyBuffer(vma_, vram_region_.buffer, vram_region_.allocation);
+      |                          ^~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘bool vk_symbiote::NomadPack::perform_migration(vk_symbiote::MemoryTier)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1308:12: warning: enumeration value ‘UNLOADED’ not handled in switch [-Wswitch]
+ 1308 |     switch (target) {
+      |            ^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:775:28: error: ‘pipeline_layout_’ was not declared in this scope; did you mean ‘VkPipelineLayout_T’?
+  775 |     pipeline_info.layout = pipeline_layout_;
+      |                            ^~~~~~~~~~~~~~~~
+      |                            VkPipelineLayout_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:796:9: error: ‘device_caps_’ was not declared in this scope
+  796 |         device_caps_.optimal_workgroup_size, 1, 1
+      |         ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:809:48: error: ‘device_’ was not declared in this scope; did you mean ‘VkDevice_T’?
+  809 |     VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &pipeline_info, nullptr, &pipeline);
+      |                                                ^~~~~~~
+      |                                                VkDevice_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:809:57: error: ‘pipeline_cache_’ was not declared in this scope; did you mean ‘VkPipelineCache_T’?
+  809 |     VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &pipeline_info, nullptr, &pipeline);
+      |                                                         ^~~~~~~~~~~~~~~
+      |                                                         VkPipelineCache_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:817:13: error: ‘ShaderRuntime’ has not been declared
+  817 | std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
+      |             ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In function ‘std::string generate_tuned_matmul_shader(uint32_t, uint32_t, uint32_t)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:822:9: error: ‘device_caps_’ was not declared in this scope
+  822 |     if (device_caps_.supports_fp16) {
+      |         ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp: In member function ‘bool vk_symbiote::NomadPack::migrate_to_vram_sync(VkBuffer, VkDeviceSize)’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1341:34: error: ‘begin_single_time_commands’ was not declared in this scope
+ 1341 |     VkCommandBuffer cmd_buffer = begin_single_time_commands();
+      |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:876:58: error: ‘device_caps_’ was not declared in this scope
+  876 |     std::string tile_size = std::to_string(std::min(32u, device_caps_.optimal_workgroup_size / 8));
+      |                                                          ^~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:817:66: warning: unused parameter ‘m’ [-Wunused-parameter]
+  817 | std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
+      |                                                         ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:817:78: warning: unused parameter ‘n’ [-Wunused-parameter]
+  817 | std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
+      |                                                                     ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:817:90: warning: unused parameter ‘k’ [-Wunused-parameter]
+  817 | std::string ShaderRuntime::generate_tuned_matmul_shader(uint32_t m, uint32_t n, uint32_t k) {
+      |                                                                                 ~~~~~~~~~^
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:887:1: error: ‘ShaderRuntime’ does not name a type
+  887 | ShaderRuntime::DeviceCapabilities ShaderRuntime::query_device_capabilities() const {
+      | ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:921:23: error: ‘ShaderRuntime’ has not been declared
+  921 | VkDescriptorSetLayout ShaderRuntime::create_descriptor_set_layout() const {
+      |                       ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:921:69: error: non-member function ‘VkDescriptorSetLayout_T* create_descriptor_set_layout()’ cannot have cv-qualifier
+  921 | VkDescriptorSetLayout ShaderRuntime::create_descriptor_set_layout() const {
+      |                                                                     ^~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In function ‘VkDescriptorSetLayout_T* create_descriptor_set_layout()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:936:33: error: ‘device_’ was not declared in this scope; did you mean ‘VkDevice_T’?
+  936 |     vkCreateDescriptorSetLayout(device_, &layout_info, nullptr, &layout);
+      |                                 ^~~~~~~
+      |                                 VkDevice_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: At global scope:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:940:18: error: ‘ShaderRuntime’ has not been declared
+  940 | VkPipelineLayout ShaderRuntime::create_pipeline_layout() const {
+      |                  ^~~~~~~~~~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:940:58: error: non-member function ‘VkPipelineLayout_T* create_pipeline_layout()’ cannot have cv-qualifier
+  940 | VkPipelineLayout ShaderRuntime::create_pipeline_layout() const {
+      |                                                          ^~~~~
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp: In function ‘VkPipelineLayout_T* create_pipeline_layout()’:
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/ShaderRuntime.cpp:949:32: error: ‘descriptor_set_layout_’ was not declared in this scope; did you mean ‘VkDescriptorSetLayout_T’?
+  949 |     layout_info.pSetLayouts = &descriptor_set_layout_;
+      |                                ^~~~~~~~~~~~~~~~~~~~~~
+      |                                VkDescriptorSetLayout_T
+/media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/NomadPack.cpp:1350:5: error: ‘end_single_time_commands’ was not declared in this scope
+ 1350 |     end_single_time_commands(cmd_buffer);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~

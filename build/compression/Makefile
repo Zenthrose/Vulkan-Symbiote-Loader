@@ -175,29 +175,77 @@ compression_backends/fast:
 	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/build
 .PHONY : compression_backends/fast
 
-noop.o: noop.cpp.o
-.PHONY : noop.o
+src/Blosc2Compression.o: src/Blosc2Compression.cpp.o
+.PHONY : src/Blosc2Compression.o
 
 # target to build an object file
-noop.cpp.o:
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/noop.cpp.o
-.PHONY : noop.cpp.o
+src/Blosc2Compression.cpp.o:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o
+.PHONY : src/Blosc2Compression.cpp.o
 
-noop.i: noop.cpp.i
-.PHONY : noop.i
+src/Blosc2Compression.i: src/Blosc2Compression.cpp.i
+.PHONY : src/Blosc2Compression.i
 
 # target to preprocess a source file
-noop.cpp.i:
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/noop.cpp.i
-.PHONY : noop.cpp.i
+src/Blosc2Compression.cpp.i:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.i
+.PHONY : src/Blosc2Compression.cpp.i
 
-noop.s: noop.cpp.s
-.PHONY : noop.s
+src/Blosc2Compression.s: src/Blosc2Compression.cpp.s
+.PHONY : src/Blosc2Compression.s
 
 # target to generate assembly for a file
-noop.cpp.s:
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/noop.cpp.s
-.PHONY : noop.cpp.s
+src/Blosc2Compression.cpp.s:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.s
+.PHONY : src/Blosc2Compression.cpp.s
+
+src/HybridCompression.o: src/HybridCompression.cpp.o
+.PHONY : src/HybridCompression.o
+
+# target to build an object file
+src/HybridCompression.cpp.o:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o
+.PHONY : src/HybridCompression.cpp.o
+
+src/HybridCompression.i: src/HybridCompression.cpp.i
+.PHONY : src/HybridCompression.i
+
+# target to preprocess a source file
+src/HybridCompression.cpp.i:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.i
+.PHONY : src/HybridCompression.cpp.i
+
+src/HybridCompression.s: src/HybridCompression.cpp.s
+.PHONY : src/HybridCompression.s
+
+# target to generate assembly for a file
+src/HybridCompression.cpp.s:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.s
+.PHONY : src/HybridCompression.cpp.s
+
+src/ZFPCompression.o: src/ZFPCompression.cpp.o
+.PHONY : src/ZFPCompression.o
+
+# target to build an object file
+src/ZFPCompression.cpp.o:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o
+.PHONY : src/ZFPCompression.cpp.o
+
+src/ZFPCompression.i: src/ZFPCompression.cpp.i
+.PHONY : src/ZFPCompression.i
+
+# target to preprocess a source file
+src/ZFPCompression.cpp.i:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.i
+.PHONY : src/ZFPCompression.cpp.i
+
+src/ZFPCompression.s: src/ZFPCompression.cpp.s
+.PHONY : src/ZFPCompression.s
+
+# target to generate assembly for a file
+src/ZFPCompression.cpp.s:
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build && $(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.s
+.PHONY : src/ZFPCompression.cpp.s
 
 # Help Target
 help:
@@ -212,9 +260,15 @@ help:
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... compression_backends"
-	@echo "... noop.o"
-	@echo "... noop.i"
-	@echo "... noop.s"
+	@echo "... src/Blosc2Compression.o"
+	@echo "... src/Blosc2Compression.i"
+	@echo "... src/Blosc2Compression.s"
+	@echo "... src/HybridCompression.o"
+	@echo "... src/HybridCompression.i"
+	@echo "... src/HybridCompression.s"
+	@echo "... src/ZFPCompression.o"
+	@echo "... src/ZFPCompression.i"
+	@echo "... src/ZFPCompression.s"
 .PHONY : help
 
 

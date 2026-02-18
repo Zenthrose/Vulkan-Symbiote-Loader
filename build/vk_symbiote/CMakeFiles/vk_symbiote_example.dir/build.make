@@ -95,6 +95,7 @@ vk_symbiote/vk_symbiote_example: vk_symbiote/CMakeFiles/vk_symbiote_example.dir/
 vk_symbiote/vk_symbiote_example: vk_symbiote/libvk_symbiote.a
 vk_symbiote/vk_symbiote_example: /usr/lib/x86_64-linux-gnu/libvulkan.so
 vk_symbiote/vk_symbiote_example: compression/libcompression_backends.a
+vk_symbiote/vk_symbiote_example: /usr/lib/x86_64-linux-gnu/libzfp.so
 vk_symbiote/vk_symbiote_example: vk_symbiote/CMakeFiles/vk_symbiote_example.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable vk_symbiote_example"
 	cd /media/michael/external/Vulkan-Symbiote-Loader/build/vk_symbiote && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/vk_symbiote_example.dir/link.txt --verbose=$(VERBOSE)

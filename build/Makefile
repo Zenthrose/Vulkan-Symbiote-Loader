@@ -213,6 +213,19 @@ vk_symbiote_benchmark/fast:
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build
 .PHONY : vk_symbiote_benchmark/fast
 
+#=============================================================================
+# Target rules for targets named benchmark_example
+
+# Build rule for target.
+benchmark_example: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 benchmark_example
+.PHONY : benchmark_example
+
+# fast build rule for target.
+benchmark_example/fast:
+	$(MAKE) $(MAKESILENT) -f examples/CMakeFiles/benchmark_example.dir/build.make examples/CMakeFiles/benchmark_example.dir/build
+.PHONY : benchmark_example/fast
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -225,6 +238,7 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
+	@echo "... benchmark_example"
 	@echo "... compression_backends"
 	@echo "... vk_symbiote"
 	@echo "... vk_symbiote_benchmark"

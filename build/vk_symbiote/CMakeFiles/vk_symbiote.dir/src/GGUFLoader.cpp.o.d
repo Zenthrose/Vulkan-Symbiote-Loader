@@ -299,10 +299,48 @@ vk_symbiote/CMakeFiles/vk_symbiote.dir/src/GGUFLoader.cpp.o: \
  /usr/include/c++/13/deque /usr/include/c++/13/bits/stl_deque.h \
  /usr/include/c++/13/bits/deque.tcc /usr/include/c++/13/bits/stl_queue.h \
  /usr/include/c++/13/future /usr/include/c++/13/bits/atomic_futex.h \
+ /usr/include/c++/13/map /usr/include/c++/13/bits/stl_tree.h \
+ /usr/include/c++/13/bits/stl_map.h \
+ /usr/include/c++/13/bits/stl_multimap.h /usr/include/c++/13/list \
+ /usr/include/c++/13/bits/stl_list.h /usr/include/c++/13/bits/list.tcc \
  /usr/include/c++/13/cstring /usr/include/string.h /usr/include/strings.h \
  /usr/include/x86_64-linux-gnu/bits/strings_fortified.h \
  /usr/include/x86_64-linux-gnu/bits/string_fortified.h \
+ /usr/include/c++/13/shared_mutex \
+ /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/ConfigManager.h \
+ /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/Utils.h \
+ /usr/include/c++/13/random /usr/include/c++/13/bits/random.h \
+ /usr/include/x86_64-linux-gnu/c++/13/bits/opt_random.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/pmmintrin.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/emmintrin.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/xmmintrin.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/mmintrin.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/mm_malloc.h \
+ /usr/include/c++/13/stdlib.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/mwaitintrin.h \
+ /usr/include/c++/13/bits/random.tcc /usr/include/c++/13/numeric \
+ /usr/include/c++/13/bits/stl_numeric.h \
+ /usr/include/c++/13/pstl/glue_numeric_defs.h \
  /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/Blosc2Compression.h \
  /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/CompressionBackend.h \
- /usr/include/c++/13/list /usr/include/c++/13/bits/stl_list.h \
- /usr/include/c++/13/bits/list.tcc /usr/include/c++/13/iostream
+ /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/ZFPCompression.h \
+ /usr/include/zfp.h /usr/include/zfp/bitstream.h \
+ /usr/include/zfp/internal/zfp/types.h /usr/include/c++/13/cinttypes \
+ /usr/include/inttypes.h /usr/include/zfp/internal/zfp/system.h \
+ /usr/include/zfp/version.h /usr/include/zfp/internal/zfp/system.h \
+ /usr/include/zfp/internal/zfp/types.h \
+ /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/src/../../compression/include/HybridCompression.h \
+ /usr/include/c++/13/iostream /usr/include/c++/13/regex \
+ /usr/include/c++/13/bitset /usr/include/c++/13/stack \
+ /usr/include/c++/13/bits/stl_stack.h \
+ /usr/include/c++/13/bits/regex_constants.h \
+ /usr/include/c++/13/bits/regex_error.h \
+ /usr/include/c++/13/bits/regex_automaton.h \
+ /usr/include/c++/13/bits/regex_automaton.tcc \
+ /usr/include/c++/13/bits/regex_scanner.h \
+ /usr/include/c++/13/bits/regex_scanner.tcc \
+ /usr/include/c++/13/bits/regex_compiler.h \
+ /usr/include/c++/13/bits/regex_compiler.tcc \
+ /usr/include/c++/13/bits/regex.h /usr/include/c++/13/bits/regex.tcc \
+ /usr/include/c++/13/bits/regex_executor.h \
+ /usr/include/c++/13/bits/regex_executor.tcc

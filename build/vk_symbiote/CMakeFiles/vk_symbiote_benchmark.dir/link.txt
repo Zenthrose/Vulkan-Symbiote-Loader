@@ -1,1 +1,1 @@
-/usr/bin/c++  -march=native -O3 -DNDEBUG CMakeFiles/vk_symbiote_benchmark.dir/examples/benchmark.cpp.o -o vk_symbiote_benchmark  libvk_symbiote.a /usr/lib/x86_64-linux-gnu/libvulkan.so ../compression/libcompression_backends.a -lpthread -ldl 
+/usr/bin/c++  -march=native -O3 -DNDEBUG CMakeFiles/vk_symbiote_benchmark.dir/examples/benchmark.cpp.o -o vk_symbiote_benchmark  libvk_symbiote.a /usr/lib/x86_64-linux-gnu/libvulkan.so ../compression/libcompression_backends.a -lblosc2 /usr/lib/x86_64-linux-gnu/libzfp.so -lpthread -ldl 

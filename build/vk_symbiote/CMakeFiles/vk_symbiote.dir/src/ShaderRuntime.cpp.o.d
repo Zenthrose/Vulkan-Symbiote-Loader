@@ -300,6 +300,10 @@ vk_symbiote/CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o: \
  /usr/include/c++/13/deque /usr/include/c++/13/bits/stl_deque.h \
  /usr/include/c++/13/bits/deque.tcc /usr/include/c++/13/bits/stl_queue.h \
  /usr/include/c++/13/future /usr/include/c++/13/bits/atomic_futex.h \
+ /usr/include/c++/13/map /usr/include/c++/13/bits/stl_tree.h \
+ /usr/include/c++/13/bits/stl_map.h \
+ /usr/include/c++/13/bits/stl_multimap.h /usr/include/c++/13/list \
+ /usr/include/c++/13/bits/stl_list.h /usr/include/c++/13/bits/list.tcc \
  /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/VitalityOracle.h \
  /usr/include/c++/13/random /usr/include/c++/13/bits/random.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/opt_random.h \
@@ -317,6 +321,8 @@ vk_symbiote/CMakeFiles/vk_symbiote.dir/src/ShaderRuntime.cpp.o: \
  /usr/include/c++/13/cstring /usr/include/string.h /usr/include/strings.h \
  /usr/include/x86_64-linux-gnu/bits/strings_fortified.h \
  /usr/include/x86_64-linux-gnu/bits/string_fortified.h \
+ /usr/include/c++/13/shared_mutex \
+ /media/michael/external/Vulkan-Symbiote-Loader/vk_symbiote/include/vk_symbiote/ConfigManager.h \
  /usr/include/c++/13/iostream /usr/include/x86_64-linux-gnu/sys/stat.h \
  /usr/include/x86_64-linux-gnu/bits/stat.h \
  /usr/include/x86_64-linux-gnu/bits/struct_stat.h \

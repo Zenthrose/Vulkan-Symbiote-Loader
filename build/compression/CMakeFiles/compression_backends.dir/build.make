@@ -69,31 +69,63 @@ include compression/CMakeFiles/compression_backends.dir/progress.make
 # Include the compile flags for this target's objects.
 include compression/CMakeFiles/compression_backends.dir/flags.make
 
-compression/CMakeFiles/compression_backends.dir/noop.cpp.o: compression/CMakeFiles/compression_backends.dir/flags.make
-compression/CMakeFiles/compression_backends.dir/noop.cpp.o: compression/noop.cpp
-compression/CMakeFiles/compression_backends.dir/noop.cpp.o: compression/CMakeFiles/compression_backends.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object compression/CMakeFiles/compression_backends.dir/noop.cpp.o"
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT compression/CMakeFiles/compression_backends.dir/noop.cpp.o -MF CMakeFiles/compression_backends.dir/noop.cpp.o.d -o CMakeFiles/compression_backends.dir/noop.cpp.o -c /media/michael/external/Vulkan-Symbiote-Loader/build/compression/noop.cpp
+compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o: compression/CMakeFiles/compression_backends.dir/flags.make
+compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o: /media/michael/external/Vulkan-Symbiote-Loader/compression/src/Blosc2Compression.cpp
+compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o: compression/CMakeFiles/compression_backends.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o -MF CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o.d -o CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o -c /media/michael/external/Vulkan-Symbiote-Loader/compression/src/Blosc2Compression.cpp
 
-compression/CMakeFiles/compression_backends.dir/noop.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/compression_backends.dir/noop.cpp.i"
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /media/michael/external/Vulkan-Symbiote-Loader/build/compression/noop.cpp > CMakeFiles/compression_backends.dir/noop.cpp.i
+compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.i"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /media/michael/external/Vulkan-Symbiote-Loader/compression/src/Blosc2Compression.cpp > CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.i
 
-compression/CMakeFiles/compression_backends.dir/noop.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/compression_backends.dir/noop.cpp.s"
-	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /media/michael/external/Vulkan-Symbiote-Loader/build/compression/noop.cpp -o CMakeFiles/compression_backends.dir/noop.cpp.s
+compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.s"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /media/michael/external/Vulkan-Symbiote-Loader/compression/src/Blosc2Compression.cpp -o CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.s
+
+compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o: compression/CMakeFiles/compression_backends.dir/flags.make
+compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o: /media/michael/external/Vulkan-Symbiote-Loader/compression/src/ZFPCompression.cpp
+compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o: compression/CMakeFiles/compression_backends.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o -MF CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o.d -o CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o -c /media/michael/external/Vulkan-Symbiote-Loader/compression/src/ZFPCompression.cpp
+
+compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.i"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /media/michael/external/Vulkan-Symbiote-Loader/compression/src/ZFPCompression.cpp > CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.i
+
+compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.s"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /media/michael/external/Vulkan-Symbiote-Loader/compression/src/ZFPCompression.cpp -o CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.s
+
+compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o: compression/CMakeFiles/compression_backends.dir/flags.make
+compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o: /media/michael/external/Vulkan-Symbiote-Loader/compression/src/HybridCompression.cpp
+compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o: compression/CMakeFiles/compression_backends.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o -MF CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o.d -o CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o -c /media/michael/external/Vulkan-Symbiote-Loader/compression/src/HybridCompression.cpp
+
+compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.i"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /media/michael/external/Vulkan-Symbiote-Loader/compression/src/HybridCompression.cpp > CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.i
+
+compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.s"
+	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /media/michael/external/Vulkan-Symbiote-Loader/compression/src/HybridCompression.cpp -o CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.s
 
 # Object files for target compression_backends
 compression_backends_OBJECTS = \
-"CMakeFiles/compression_backends.dir/noop.cpp.o"
+"CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o" \
+"CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o" \
+"CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o"
 
 # External object files for target compression_backends
 compression_backends_EXTERNAL_OBJECTS =
 
-compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/noop.cpp.o
+compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o
+compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o
+compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o
 compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/build.make
 compression/libcompression_backends.a: compression/CMakeFiles/compression_backends.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX static library libcompression_backends.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libcompression_backends.a"
 	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && $(CMAKE_COMMAND) -P CMakeFiles/compression_backends.dir/cmake_clean_target.cmake
 	cd /media/michael/external/Vulkan-Symbiote-Loader/build/compression && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/compression_backends.dir/link.txt --verbose=$(VERBOSE)
 

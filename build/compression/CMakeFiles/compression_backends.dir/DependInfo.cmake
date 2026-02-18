@@ -8,7 +8,9 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/media/michael/external/Vulkan-Symbiote-Loader/build/compression/noop.cpp" "compression/CMakeFiles/compression_backends.dir/noop.cpp.o" "gcc" "compression/CMakeFiles/compression_backends.dir/noop.cpp.o.d"
+  "/media/michael/external/Vulkan-Symbiote-Loader/compression/src/Blosc2Compression.cpp" "compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o" "gcc" "compression/CMakeFiles/compression_backends.dir/src/Blosc2Compression.cpp.o.d"
+  "/media/michael/external/Vulkan-Symbiote-Loader/compression/src/HybridCompression.cpp" "compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o" "gcc" "compression/CMakeFiles/compression_backends.dir/src/HybridCompression.cpp.o.d"
+  "/media/michael/external/Vulkan-Symbiote-Loader/compression/src/ZFPCompression.cpp" "compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o" "gcc" "compression/CMakeFiles/compression_backends.dir/src/ZFPCompression.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

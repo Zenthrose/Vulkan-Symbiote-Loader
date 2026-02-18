@@ -1,0 +1,155 @@
+# Vulkan Symbiote Engine Configuration
+# This is a comprehensive TOML configuration file for the inference engine
+
+[memory]
+# Memory budgets in GB
+vram_budget_gb = 8.0
+ram_budget_gb = 32.0
+
+# Prefetching and caching
+prefetch_lookahead = 3
+eviction_aggression = 0.7
+max_packs_in_memory = 2000
+
+# Compression settings
+enable_compression = true
+compression_algorithm = "hybrid"
+
+# Defragmentation
+enable_defrag = true
+defrag_interval_ms = 5000
+
+[performance]
+# GPU compute settings
+enable_gpu = true
+enable_profiling = false
+
+# Workgroup configuration
+workgroup_size_x = 256
+workgroup_size_y = 1
+workgroup_size_z = 1
+
+# Subgroup operations
+use_subgroup_ops = true
+subgroup_size = 32
+
+# Math precision
+use_fp16_math = true
+scale_factor = 1.0
+
+# Thread pool
+thread_pool_size = 0  # 0 = auto-detect
+
+[power]
+# Power management
+enable_power_management = true
+enable_power_saver = false
+auto_detect_battery = true
+
+# Power profile: 0=performance, 1=balanced, 2=powersaver
+power_profile = 1
+
+# Battery thresholds
+battery_threshold_low = 0.25
+battery_threshold_critical = 0.10
+
+# Throttling settings
+throttle_on_thermal = true
+reduce_workgroup_on_battery = true
+min_workgroup_size_battery = 64
+prefetch_reduction_factor = 2
+disable_profiling_on_battery = true
+battery_threshold_percent = 30
+max_workgroup_size_battery = 64
+prefetch_lookahead_battery = 1
+
+[benchmark]
+# Benchmark configuration
+enable_benchmark_mode = false
+warmup_tokens = 10
+benchmark_tokens = 100
+iterations = 3
+
+# Output settings
+output_json = true
+output_file = "benchmark_results.json"
+
+# Test modes
+test_power_modes = false
+test_memory_pressure = false
+detailed_layer_stats = false
+
+[logging]
+# Logging configuration
+log_level = 1  # 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR, 4=FATAL
+log_to_file = false
+log_file_path = "vk_symbiote.log"
+log_performance = false
+log_memory_usage = false
+max_log_file_size_mb = 100
+log_to_console = true
+
+[codec]
+# Compression codec settings
+codec = "hybrid"
+compression_level = 5
+
+# Blosc2 settings
+enable_blosc2 = true
+blosc2_compressor = "lz4"
+blosc2_shuffle = true
+
+# ZFP settings
+enable_zfp = false
+zfp_precision = 16
+zfp_rate = 0.0
+
+# Hybrid settings
+enable_hybrid = true
+hybrid_mode = "auto"
+hybrid_compression_ratio = 0.5
+
+# Decompression
+decompression_threads = 0  # 0 = auto
+
+# Backward compatibility
+enable_compression = true
+algorithm = "hybrid"
+
+[batch]
+# Batching configuration
+enable_batching = true
+max_batch_size = 8
+dynamic_batch_size = true
+batch_timeout_ms = 100
+prefetch_for_batch = true
+share_kv_cache = false
+max_sequence_length = 8192
+
+[vitality]
+# Vitality Oracle configuration
+enabled = true
+learning_rate = 0.001
+momentum = 0.9
+use_adam = false
+model_path = "vitality_model.toml"
+
+[shader]
+# Shader compilation settings
+cache_dir = ".shader_cache"
+enable_cache = true
+
+# Cooperative matrices
+use_cooperative_matrix = true
+coop_matrix_m = 16
+coop_matrix_n = 16
+coop_matrix_k = 16
+
+# Auto-tuning
+auto_tune = true
+tuning_file = "shader_tuning.conf"
+
+[model]
+# Model configuration (usually loaded from GGUF)
+model_path = ""
+model_type = "llama"

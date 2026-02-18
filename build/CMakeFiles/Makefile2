@@ -65,16 +65,19 @@ CMAKE_BINARY_DIR = /media/michael/external/Vulkan-Symbiote-Loader/build
 # The main recursive "all" target.
 all: compression/all
 all: vk_symbiote/all
+all: examples/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
 preinstall: compression/preinstall
 preinstall: vk_symbiote/preinstall
+preinstall: examples/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
 clean: compression/clean
 clean: vk_symbiote/clean
+clean: examples/clean
 .PHONY : clean
 
 #=============================================================================
@@ -91,6 +94,21 @@ compression/preinstall:
 # Recursive "clean" directory target.
 compression/clean: compression/CMakeFiles/compression_backends.dir/clean
 .PHONY : compression/clean
+
+#=============================================================================
+# Directory level rules for directory examples
+
+# Recursive "all" directory target.
+examples/all: examples/CMakeFiles/benchmark_example.dir/all
+.PHONY : examples/all
+
+# Recursive "preinstall" directory target.
+examples/preinstall:
+.PHONY : examples/preinstall
+
+# Recursive "clean" directory target.
+examples/clean: examples/CMakeFiles/benchmark_example.dir/clean
+.PHONY : examples/clean
 
 #=============================================================================
 # Directory level rules for directory vk_symbiote
@@ -118,12 +136,12 @@ vk_symbiote/clean: vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/clean
 compression/CMakeFiles/compression_backends.dir/all:
 	$(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/depend
 	$(MAKE) $(MAKESILENT) -f compression/CMakeFiles/compression_backends.dir/build.make compression/CMakeFiles/compression_backends.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=1,2 "Built target compression_backends"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=3,4,5,6 "Built target compression_backends"
 .PHONY : compression/CMakeFiles/compression_backends.dir/all
 
 # Build rule for subdir invocation for target.
 compression/CMakeFiles/compression_backends.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 4
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 compression/CMakeFiles/compression_backends.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 0
 .PHONY : compression/CMakeFiles/compression_backends.dir/rule
@@ -144,12 +162,12 @@ compression/CMakeFiles/compression_backends.dir/clean:
 vk_symbiote/CMakeFiles/vk_symbiote.dir/all: compression/CMakeFiles/compression_backends.dir/all
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote.dir/depend
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=3,4,5,6,7,8,9,10,11,12 "Built target vk_symbiote"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=7,8,9,10,11,12,13,14,15,16 "Built target vk_symbiote"
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 
 # Build rule for subdir invocation for target.
 vk_symbiote/CMakeFiles/vk_symbiote.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 12
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 14
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 0
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote.dir/rule
@@ -167,16 +185,16 @@ vk_symbiote/CMakeFiles/vk_symbiote.dir/clean:
 # Target rules for target vk_symbiote/CMakeFiles/vk_symbiote_example.dir
 
 # All Build rule for target.
-vk_symbiote/CMakeFiles/vk_symbiote_example.dir/all: vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 vk_symbiote/CMakeFiles/vk_symbiote_example.dir/all: compression/CMakeFiles/compression_backends.dir/all
+vk_symbiote/CMakeFiles/vk_symbiote_example.dir/all: vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_example.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_example.dir/depend
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_example.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_example.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=15,16 "Built target vk_symbiote_example"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=19,20 "Built target vk_symbiote_example"
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote_example.dir/all
 
 # Build rule for subdir invocation for target.
 vk_symbiote/CMakeFiles/vk_symbiote_example.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 14
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 16
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vk_symbiote/CMakeFiles/vk_symbiote_example.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 0
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote_example.dir/rule
@@ -194,16 +212,16 @@ vk_symbiote/CMakeFiles/vk_symbiote_example.dir/clean:
 # Target rules for target vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir
 
 # All Build rule for target.
-vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/all: vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/all: compression/CMakeFiles/compression_backends.dir/all
+vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/all: vk_symbiote/CMakeFiles/vk_symbiote.dir/all
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/depend
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=13,14 "Built target vk_symbiote_benchmark"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=17,18 "Built target vk_symbiote_benchmark"
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/all
 
 # Build rule for subdir invocation for target.
 vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 14
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 16
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 0
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/rule
@@ -216,6 +234,33 @@ vk_symbiote_benchmark: vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/rule
 vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/clean:
 	$(MAKE) $(MAKESILENT) -f vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/build.make vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/clean
 .PHONY : vk_symbiote/CMakeFiles/vk_symbiote_benchmark.dir/clean
+
+#=============================================================================
+# Target rules for target examples/CMakeFiles/benchmark_example.dir
+
+# All Build rule for target.
+examples/CMakeFiles/benchmark_example.dir/all: compression/CMakeFiles/compression_backends.dir/all
+examples/CMakeFiles/benchmark_example.dir/all: vk_symbiote/CMakeFiles/vk_symbiote.dir/all
+	$(MAKE) $(MAKESILENT) -f examples/CMakeFiles/benchmark_example.dir/build.make examples/CMakeFiles/benchmark_example.dir/depend
+	$(MAKE) $(MAKESILENT) -f examples/CMakeFiles/benchmark_example.dir/build.make examples/CMakeFiles/benchmark_example.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles --progress-num=1,2 "Built target benchmark_example"
+.PHONY : examples/CMakeFiles/benchmark_example.dir/all
+
+# Build rule for subdir invocation for target.
+examples/CMakeFiles/benchmark_example.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 16
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 examples/CMakeFiles/benchmark_example.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /media/michael/external/Vulkan-Symbiote-Loader/build/CMakeFiles 0
+.PHONY : examples/CMakeFiles/benchmark_example.dir/rule
+
+# Convenience name for target.
+benchmark_example: examples/CMakeFiles/benchmark_example.dir/rule
+.PHONY : benchmark_example
+
+# clean rule for target.
+examples/CMakeFiles/benchmark_example.dir/clean:
+	$(MAKE) $(MAKESILENT) -f examples/CMakeFiles/benchmark_example.dir/build.make examples/CMakeFiles/benchmark_example.dir/clean
+.PHONY : examples/CMakeFiles/benchmark_example.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
