@@ -20,6 +20,12 @@ layout(push_constant) uniform PC {
 
 float silu(float x) { return x / (1.0 + exp(-x)); }
 
+// Shared memory for gate/up projections per token
+// Each thread handles one output dimension
+// Shared memory holds intermediate results [intermediate_size]
+shared float shared_gate[4096];  // Max intermediate size
+shared float shared_up[4096];
+
 void main() {
     uint32_t gid = gl_GlobalInvocationID.x;
     uint32_t token = gid / pc.hidden_size;
@@ -27,35 +33,34 @@ void main() {
     
     if (token >= pc.seq_len || h >= pc.hidden_size) return;
     
-    uint32_t base_idx = token * pc.hidden_size + h;
-    float input_val = input_data[base_idx];
-    
-    // Compute gate and up projections
-    float gate_sum = 0.0;
-    float up_sum = 0.0;
-    
-    for (uint32_t i = 0; i < pc.intermediate_size; ++i) {
-        // Gate projection with SiLU activation
+    // Compute gate and up projections once per token in parallel
+    // This is done by all threads cooperatively
+    for (uint32_t i = gl_LocalInvocationID.x; i < pc.intermediate_size; i += gl_WorkGroupSize.x) {
         float gate = 0.0;
-        for (uint32_t j = 0; j < pc.hidden_size; ++j) {
-            gate += input_data[token * pc.hidden_size + j] * gate_weight[i * pc.hidden_size + j];
-        }
-        gate = silu(gate);
-        
-        // Up projection
         float up = 0.0;
+        
+        // Matrix multiplication: input [hidden] @ weight [hidden, intermediate]
         for (uint32_t j = 0; j < pc.hidden_size; ++j) {
-            up += input_data[token * pc.hidden_size + j] * up_weight[i * pc.hidden_size + j];
+            float input_val = input_data[token * pc.hidden_size + j];
+            gate += input_val * gate_weight[i * pc.hidden_size + j];
+            up += input_val * up_weight[i * pc.hidden_size + j];
         }
         
-        // Multiply and accumulate with down projection
-        float activated = gate * up;
-        for (uint32_t j = 0; j < pc.hidden_size; ++j) {
-            if (j == h) {
-                up_sum += activated * down_weight[j * pc.intermediate_size + i];
-            }
-        }
+        shared_gate[i] = silu(gate);
+        shared_up[i] = up;
     }
     
-    output_data[base_idx] = up_sum;
+    barrier();
+    
+    // Now compute down projection for this thread's output dimension
+    float output_val = 0.0;
+    
+    // Matrix multiplication: (gate * up) [intermediate] @ down_weight [intermediate, hidden]
+    // Each thread computes one output dimension h
+    for (uint32_t i = 0; i < pc.intermediate_size; ++i) {
+        output_val += shared_gate[i] * shared_up[i] * down_weight[i * pc.hidden_size + h];
+    }
+    
+    uint32_t base_idx = token * pc.hidden_size + h;
+    output_data[base_idx] = output_val;
 }

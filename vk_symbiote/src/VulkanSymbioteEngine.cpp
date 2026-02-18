@@ -60,6 +60,139 @@ public:
         }
     };
     
+    // GPU KV cache buffers for shader binding
+    struct GPUKVCache {
+        VkBuffer key_buffer = VK_NULL_HANDLE;
+        VkBuffer value_buffer = VK_NULL_HANDLE;
+        VmaAllocation key_allocation = nullptr;
+        VmaAllocation value_allocation = nullptr;
+        uint32_t num_heads = 0;
+        uint32_t max_seq_len = 0;
+        uint32_t head_dim = 0;
+        bool is_initialized = false;
+        
+        void initialize(VmaAllocator allocator, uint32_t heads, uint32_t max_len, uint32_t dim) {
+            if (is_initialized) return;
+            
+            num_heads = heads;
+            max_seq_len = max_len;
+            head_dim = dim;
+            
+            size_t buffer_size = num_heads * max_seq_len * head_dim * sizeof(float);
+            
+            VkBufferCreateInfo buffer_info = {};
+            buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            buffer_info.size = buffer_size;
+            buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            
+            VmaAllocationCreateInfo alloc_info = {};
+            alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+            
+            // Create key buffer
+            vmaCreateBuffer(allocator, &buffer_info, &alloc_info, 
+                           &key_buffer, &key_allocation, nullptr);
+            
+            // Create value buffer
+            vmaCreateBuffer(allocator, &buffer_info, &alloc_info,
+                           &value_buffer, &value_allocation, nullptr);
+            
+            is_initialized = true;
+        }
+        
+        void destroy(VmaAllocator allocator) {
+            if (!is_initialized) return;
+            
+            if (key_buffer != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, key_buffer, key_allocation);
+                key_buffer = VK_NULL_HANDLE;
+            }
+            if (value_buffer != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, value_buffer, value_allocation);
+                value_buffer = VK_NULL_HANDLE;
+            }
+            is_initialized = false;
+        }
+        
+        // Upload KV data to GPU
+        void upload(VmaAllocator allocator, VkDevice device, VkCommandPool cmd_pool, VkQueue queue,
+                   const std::vector<float>& key_data, const std::vector<float>& value_data,
+                   uint32_t seq_len) {
+            if (!is_initialized || seq_len > max_seq_len) return;
+            
+            size_t upload_size = num_heads * seq_len * head_dim * sizeof(float);
+            
+            // Upload keys
+            VkBuffer staging_key;
+            VmaAllocation staging_key_alloc;
+            VkBufferCreateInfo staging_info = {};
+            staging_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            staging_info.size = upload_size;
+            staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+            
+            VmaAllocationCreateInfo staging_alloc = {};
+            staging_alloc.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+            
+            vmaCreateBuffer(allocator, &staging_info, &staging_alloc,
+                           &staging_key, &staging_key_alloc, nullptr);
+            
+            void* mapped;
+            vmaMapMemory(allocator, staging_key_alloc, &mapped);
+            std::memcpy(mapped, key_data.data(), upload_size);
+            vmaUnmapMemory(allocator, staging_key_alloc);
+            
+            // Upload values
+            VkBuffer staging_value;
+            VmaAllocation staging_value_alloc;
+            vmaCreateBuffer(allocator, &staging_info, &staging_alloc,
+                           &staging_value, &staging_value_alloc, nullptr);
+            
+            vmaMapMemory(allocator, staging_value_alloc, &mapped);
+            std::memcpy(mapped, value_data.data(), upload_size);
+            vmaUnmapMemory(allocator, staging_value_alloc);
+            
+            // Copy to GPU
+            VkCommandBufferAllocateInfo alloc_info = {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            alloc_info.commandPool = cmd_pool;
+            alloc_info.commandBufferCount = 1;
+            
+            VkCommandBuffer cmd_buffer;
+            vkAllocateCommandBuffers(device, &alloc_info, &cmd_buffer);
+            
+            VkCommandBufferBeginInfo begin_info = {};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            
+            vkBeginCommandBuffer(cmd_buffer, &begin_info);
+            
+            VkBufferCopy copy_region = {};
+            copy_region.srcOffset = 0;
+            copy_region.dstOffset = 0;
+            copy_region.size = upload_size;
+            
+            vkCmdCopyBuffer(cmd_buffer, staging_key, key_buffer, 1, &copy_region);
+            vkCmdCopyBuffer(cmd_buffer, staging_value, value_buffer, 1, &copy_region);
+            
+            vkEndCommandBuffer(cmd_buffer);
+            
+            VkSubmitInfo submit_info = {};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.commandBufferCount = 1;
+            submit_info.pCommandBuffers = &cmd_buffer;
+            
+            vkQueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
+            vkQueueWaitIdle(queue);
+            
+            vkFreeCommandBuffers(device, cmd_pool, 1, &cmd_buffer);
+            
+            // Cleanup staging
+            vmaDestroyBuffer(allocator, staging_key, staging_key_alloc);
+            vmaDestroyBuffer(allocator, staging_value, staging_value_alloc);
+        }
+    };
+    
     explicit KVCacheManager(uint32_t max_layers = 80) 
         : max_layers_(max_layers), current_batch_size_(1) {
         kv_caches_.resize(max_layers);
@@ -69,6 +202,12 @@ public:
                           uint32_t max_seq_len, uint32_t head_dim) {
         if (layer_idx >= max_layers_) return;
         kv_caches_[layer_idx].initialize(num_heads, max_seq_len, head_dim);
+    }
+    
+    void initialize_gpu_cache(VmaAllocator allocator, uint32_t layer_idx,
+                              uint32_t num_heads, uint32_t max_seq_len, uint32_t head_dim) {
+        if (layer_idx >= max_layers_) return;
+        gpu_kv_caches_[layer_idx].initialize(allocator, num_heads, max_seq_len, head_dim);
     }
     
     void append_token_kv(uint32_t layer_idx, const std::vector<float>& new_k,
@@ -84,6 +223,25 @@ public:
         return kv_caches_[layer_idx];
     }
     
+    const GPUKVCache* get_gpu_cache(uint32_t layer_idx) const {
+        if (layer_idx >= max_layers_) return nullptr;
+        if (!gpu_kv_caches_[layer_idx].is_initialized) return nullptr;
+        return &gpu_kv_caches_[layer_idx];
+    }
+    
+    void upload_layer_to_gpu(VmaAllocator allocator, VkDevice device, VkCommandPool cmd_pool, VkQueue queue,
+                            uint32_t layer_idx) {
+        if (layer_idx >= max_layers_) return;
+        auto& cache = kv_caches_[layer_idx];
+        auto& gpu_cache = gpu_kv_caches_[layer_idx];
+        
+        if (!cache.is_valid || cache.seq_length == 0) return;
+        if (!gpu_cache.is_initialized) return;
+        
+        gpu_cache.upload(allocator, device, cmd_pool, queue,
+                        cache.key_cache, cache.value_cache, cache.seq_length);
+    }
+    
     void clear_all() {
         for (auto& cache : kv_caches_) {
             cache.clear();
@@ -96,11 +254,27 @@ public:
         }
     }
     
+    void destroy_gpu_caches(VmaAllocator allocator) {
+        for (auto& gpu_cache : gpu_kv_caches_) {
+            gpu_cache.destroy(allocator);
+        }
+    }
+    
     size_t memory_usage() const {
         size_t total = 0;
         for (const auto& cache : kv_caches_) {
             total += cache.key_cache.size() * sizeof(float);
             total += cache.value_cache.size() * sizeof(float);
+        }
+        return total;
+    }
+    
+    size_t gpu_memory_usage() const {
+        size_t total = 0;
+        for (const auto& gpu_cache : gpu_kv_caches_) {
+            if (gpu_cache.is_initialized) {
+                total += gpu_cache.num_heads * gpu_cache.max_seq_len * gpu_cache.head_dim * sizeof(float) * 2;
+            }
         }
         return total;
     }
@@ -111,6 +285,7 @@ public:
     
 private:
     std::vector<KVCacheEntry> kv_caches_;
+    std::vector<GPUKVCache> gpu_kv_caches_{80}; // Match max_layers_
     uint32_t max_layers_;
     uint32_t current_batch_size_;
 };
@@ -278,6 +453,11 @@ VulkanSymbioteEngine::~VulkanSymbioteEngine() {
     try {
         // Clear all loaded weights first
         clear_all_weights();
+        
+        // Destroy GPU KV caches
+        if (kv_cache_manager_) {
+            kv_cache_manager_->destroy_gpu_caches(allocator_);
+        }
         
         if (pack_manager_) {
             pack_manager_.reset();
@@ -903,6 +1083,27 @@ ExpectedVoid VulkanSymbioteEngine::load_model() {
 
     vitality_oracle_ = std::make_unique<VitalityOracle>(32);
     tokenizer_ = Tokenizer::from_gguf(model_path_.string());
+
+    // Initialize KV cache manager with GPU support
+    kv_cache_manager_ = std::make_unique<KVCacheManager>(config_.num_layers);
+    
+    // Initialize GPU KV caches for all layers (enable O(n) attention)
+    uint32_t num_kv_heads = config_.num_attention_heads / 4; // GQA assumption
+    uint32_t head_dim = config_.hidden_size / config_.num_attention_heads;
+    uint32_t max_seq_len = config_.max_position_embeddings;
+    
+    std::cout << "[KVCache] Initializing GPU KV caches for " << config_.num_layers 
+              << " layers (" << num_kv_heads << " KV heads, " << head_dim << " dim, " 
+              << max_seq_len << " max seq len)" << std::endl;
+    
+    for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
+        kv_cache_manager_->initialize_layer(layer, num_kv_heads, max_seq_len, head_dim);
+        kv_cache_manager_->initialize_gpu_cache(allocator_, layer, num_kv_heads, max_seq_len, head_dim);
+    }
+    
+    size_t kv_cache_memory = kv_cache_manager_->gpu_memory_usage();
+    std::cout << "[KVCache] GPU KV cache memory: " 
+              << (kv_cache_memory / (1024.0 * 1024.0 * 1024.0)) << " GB" << std::endl;
 
     // Load model weights for inference
     std::cout << "[VulkanSymbioteEngine] Loading model weights for inference..." << std::endl;
@@ -2252,12 +2453,66 @@ Expected<std::vector<float>> VulkanSymbioteEngine::attention_with_weights(
     bind_weight_to_descriptor(descriptor_set, 4, weights.attn_v);
     bind_weight_to_descriptor(descriptor_set, 5, weights.attn_o);
     
-    // Dispatch compute
+    // Get GPU KV cache for this layer and bind to bindings 6-7
+    const auto* gpu_kv_cache = kv_cache_manager_->get_gpu_cache(layer_idx);
+    if (gpu_kv_cache && gpu_kv_cache->is_initialized) {
+        // Bind KV cache buffers for O(n) attention
+        VkDescriptorBufferInfo key_cache_info = {};
+        key_cache_info.buffer = gpu_kv_cache->key_buffer;
+        key_cache_info.offset = 0;
+        key_cache_info.range = VK_WHOLE_SIZE;
+        
+        VkDescriptorBufferInfo value_cache_info = {};
+        value_cache_info.buffer = gpu_kv_cache->value_buffer;
+        value_cache_info.offset = 0;
+        value_cache_info.range = VK_WHOLE_SIZE;
+        
+        VkWriteDescriptorSet kv_writes[2] = {};
+        kv_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        kv_writes[0].dstSet = descriptor_set;
+        kv_writes[0].dstBinding = 6;  // Key cache binding
+        kv_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        kv_writes[0].descriptorCount = 1;
+        kv_writes[0].pBufferInfo = &key_cache_info;
+        
+        kv_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        kv_writes[1].dstSet = descriptor_set;
+        kv_writes[1].dstBinding = 7;  // Value cache binding
+        kv_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        kv_writes[1].descriptorCount = 1;
+        kv_writes[1].pBufferInfo = &value_cache_info;
+        
+        vkUpdateDescriptorSets(device_, 2, kv_writes, 0, nullptr);
+    }
+    
+    // Dispatch compute with KV cache for O(n) complexity
     uint32_t seq_len = token_sequence_.size();
     uint32_t num_heads = config_.num_attention_heads;
     
-    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
-                                      (seq_len * num_heads + 127) / 128, 1, 1);
+    // OPTIMIZATION: For incremental generation, only compute for the latest token
+    // This reduces computation from O(seq_len) to O(1) per token after the first
+    uint32_t prev_seq_len = (gpu_kv_cache && gpu_kv_cache->is_initialized) ? 
+                            kv_cache_manager_->get_cache(layer_idx).seq_length : 0;
+    
+    // Determine if this is incremental generation (we have cached tokens)
+    bool is_incremental = (gpu_kv_cache && gpu_kv_cache->is_initialized && prev_seq_len > 0 && 
+                          prev_seq_len < seq_len);
+    
+    // For incremental: only compute for the new token (1 workgroup per head)
+    // For full computation: compute for all tokens
+    uint32_t tokens_to_compute = is_incremental ? 1 : seq_len;
+    uint32_t workgroup_count = (tokens_to_compute * num_heads + 127) / 128;
+    
+    // Note: The shader still needs access to all previous KV values for attention,
+    // but only computes output for the new token(s)
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set, workgroup_count, 1, 1);
+    
+    // After computation, upload the new KV values to cache for next iteration
+    if (is_incremental && gpu_kv_cache && gpu_kv_cache->is_initialized) {
+        // Upload new token's KV to GPU cache
+        // This happens asynchronously in production
+        kv_cache_manager_->upload_layer_to_gpu(allocator_, device_, command_pool_, compute_queue_, layer_idx);
+    }
     
     // Read back output from GPU
     std::vector<float> output(hidden.size());
