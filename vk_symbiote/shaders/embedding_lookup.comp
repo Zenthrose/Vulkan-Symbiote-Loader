@@ -1,0 +1,41 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(local_size_x = 256) in;
+
+// Token IDs input
+layout(binding = 0, std430) readonly buffer TokenBuf { uint32_t token_ids[]; };
+
+// Output embeddings [seq_len, hidden_size]
+layout(binding = 1, std430) writeonly buffer OutputBuf { float output_data[]; };
+
+// Embedding weight table [vocab_size, hidden_size]
+layout(binding = 2, std430) readonly buffer EmbeddingWeight { float embedding_table[]; };
+
+layout(push_constant) uniform PC {
+    uint32_t seq_len;
+    uint32_t hidden_size;
+    uint32_t vocab_size;
+} pc;
+
+void main() {
+    uint32_t gid = gl_GlobalInvocationID.x;
+    uint32_t token_idx = gid / pc.hidden_size;
+    uint32_t hidden_dim = gid % pc.hidden_size;
+    
+    if (token_idx >= pc.seq_len || hidden_dim >= pc.hidden_size) return;
+    
+    // Get token ID
+    uint32_t token_id = token_ids[token_idx];
+    
+    // Clamp to vocab size
+    token_id = min(token_id, pc.vocab_size - 1);
+    
+    // Gather embedding from table
+    uint32_t embed_idx = token_id * pc.hidden_size + hidden_dim;
+    float embed_val = embedding_table[embed_idx];
+    
+    // Write to output
+    uint32_t out_idx = token_idx * pc.hidden_size + hidden_dim;
+    output_data[out_idx] = embed_val;
+}

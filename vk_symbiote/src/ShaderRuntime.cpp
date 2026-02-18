@@ -1252,6 +1252,60 @@ VkPipeline ShaderRuntime::get_final_linear_pipeline(const ShaderSpecialization& 
     return pipeline;
 }
 
+VkPipeline ShaderRuntime::get_embedding_lookup_pipeline(const ShaderSpecialization& spec) {
+    std::string cache_key = "embedding_lookup_" + std::to_string(spec.workgroup_size_x);
+    auto it = named_pipeline_cache_.find(cache_key);
+    if (it != named_pipeline_cache_.end()) {
+        return it->second;
+    }
+    
+    // Load embedding lookup shader from file or generate inline
+    std::string shader_source = R"(
+        #version 460
+        layout(local_size_x = )" + std::to_string(spec.workgroup_size_x) + R"(, local_size_y = 1) in;
+        
+        layout(set = 0, binding = 0) readonly buffer TokenBuf { uint token_ids[]; };
+        layout(set = 0, binding = 1) writeonly buffer OutputBuf { float output_data[]; };
+        layout(set = 0, binding = 2) readonly buffer EmbeddingWeight { float embedding_table[]; };
+        
+        layout(push_constant) uniform PC {
+            uint seq_len;
+            uint hidden_size;
+            uint vocab_size;
+        } pc;
+        
+        void main() {
+            uint gid = gl_GlobalInvocationID.x;
+            uint token_idx = gid / pc.hidden_size;
+            uint hidden_dim = gid % pc.hidden_size;
+            
+            if (token_idx >= pc.seq_len || hidden_dim >= pc.hidden_size) return;
+            
+            uint token_id = token_ids[token_idx];
+            token_id = min(token_id, pc.vocab_size - 1);
+            
+            uint embed_idx = token_id * pc.hidden_size + hidden_dim;
+            float embed_val = embedding_table[embed_idx];
+            
+            uint out_idx = token_idx * pc.hidden_size + hidden_dim;
+            output_data[out_idx] = embed_val;
+        }
+    )";
+    
+    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    if (!shader_module.has_value()) {
+        return VK_NULL_HANDLE;
+    }
+    
+    VkPipeline pipeline = create_specialized_pipeline(shader_module.value(), spec);
+    vkDestroyShaderModule(device_, shader_module.value(), nullptr);
+    
+    if (pipeline != VK_NULL_HANDLE) {
+        named_pipeline_cache_[cache_key] = pipeline;
+    }
+    return pipeline;
+}
+
 void ShaderRuntime::dispatch_compute(VkPipeline pipeline, VkDescriptorSet descriptor_set,
                                      uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z) {
     VkCommandBufferAllocateInfo alloc_info = {};

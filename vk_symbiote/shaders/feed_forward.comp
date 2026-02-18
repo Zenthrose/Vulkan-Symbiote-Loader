@@ -3,32 +3,59 @@
 
 layout(local_size_x = 256) in;
 
-layout(binding = 0, std430) buffer InBuf { float in_d[]; };
-layout(binding = 1, std430) buffer GateBuf { float gate_d[]; };
-layout(binding = 2, std430) buffer UpBuf { float up_d[]; };
-layout(binding = 3, std430) buffer DownBuf { float down_d[]; };
-layout(binding = 4, std430) buffer OutBuf { float out_d[]; };
+// Input/output activation buffers
+layout(binding = 0, std430) readonly buffer InputBuf { float input_data[]; };
+layout(binding = 1, std430) writeonly buffer OutputBuf { float output_data[]; };
+
+// Weight buffers
+layout(binding = 2, std430) readonly buffer GateWeight { float gate_weight[]; };
+layout(binding = 3, std430) readonly buffer UpWeight { float up_weight[]; };
+layout(binding = 4, std430) readonly buffer DownWeight { float down_weight[]; };
 
 layout(push_constant) uniform PC {
-    uint32_t hidden, inter, seq;
+    uint32_t hidden_size;
+    uint32_t intermediate_size;
+    uint32_t seq_len;
 } pc;
 
 float silu(float x) { return x / (1.0 + exp(-x)); }
 
 void main() {
     uint32_t gid = gl_GlobalInvocationID.x;
-    uint32_t token = gid / pc.hidden;
-    uint32_t dim = gid % pc.hidden;
+    uint32_t token = gid / pc.hidden_size;
+    uint32_t h = gid % pc.hidden_size;
     
-    if (token >= pc.seq || dim >= pc.hidden) return;
+    if (token >= pc.seq_len || h >= pc.hidden_size) return;
     
-    float gate = 0.0;
-    for (uint32_t i = 0; i < pc.inter; ++i) {
-        gate += in_d[token * pc.hidden + dim] * gate_d[i * pc.hidden + dim];
+    uint32_t base_idx = token * pc.hidden_size + h;
+    float input_val = input_data[base_idx];
+    
+    // Compute gate and up projections
+    float gate_sum = 0.0;
+    float up_sum = 0.0;
+    
+    for (uint32_t i = 0; i < pc.intermediate_size; ++i) {
+        // Gate projection with SiLU activation
+        float gate = 0.0;
+        for (uint32_t j = 0; j < pc.hidden_size; ++j) {
+            gate += input_data[token * pc.hidden_size + j] * gate_weight[i * pc.hidden_size + j];
+        }
+        gate = silu(gate);
+        
+        // Up projection
+        float up = 0.0;
+        for (uint32_t j = 0; j < pc.hidden_size; ++j) {
+            up += input_data[token * pc.hidden_size + j] * up_weight[i * pc.hidden_size + j];
+        }
+        
+        // Multiply and accumulate with down projection
+        float activated = gate * up;
+        for (uint32_t j = 0; j < pc.hidden_size; ++j) {
+            if (j == h) {
+                up_sum += activated * down_weight[j * pc.intermediate_size + i];
+            }
+        }
     }
-    gate = silu(gate);
     
-    for (uint32_t i = 0; i < pc.inter; ++i) {
-        out_d[token * pc.hidden + dim] += gate * up_d[i * pc.hidden + dim] * down_d[dim * pc.inter + i];
-    }
+    output_data[base_idx] = up_sum;
 }

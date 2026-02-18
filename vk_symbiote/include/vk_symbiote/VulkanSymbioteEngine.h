@@ -215,6 +215,118 @@ private:
     void append_kv_cache(uint32_t layer_idx, const std::vector<float>& key, const std::vector<float>& value);
     Expected<std::vector<float>> forward_layer_with_kv(const std::vector<float>& hidden, uint32_t layer_idx);
     
+    // ============================================================================
+    // Weight Binding System - Connects loaded model weights to GPU compute
+    // ============================================================================
+    
+public:
+    // Weight buffer handle for GPU resident weights
+    struct WeightBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation allocation = nullptr;
+        uint64_t size = 0;
+        std::string tensor_name;
+        bool is_loaded = false;
+        uint64_t last_used = 0;
+    };
+    
+    // Layer weight set - all weights for a transformer layer
+    struct LayerWeights {
+        // Attention weights
+        WeightBuffer attn_q;
+        WeightBuffer attn_k;
+        WeightBuffer attn_v;
+        WeightBuffer attn_o;
+        WeightBuffer attn_q_bias;
+        WeightBuffer attn_k_bias;
+        WeightBuffer attn_v_bias;
+        WeightBuffer attn_o_bias;
+        
+        // Feed-forward weights
+        WeightBuffer ffn_gate;
+        WeightBuffer ffn_up;
+        WeightBuffer ffn_down;
+        WeightBuffer ffn_gate_bias;
+        WeightBuffer ffn_up_bias;
+        WeightBuffer ffn_down_bias;
+        
+        // Normalization weights
+        WeightBuffer norm_attn_gamma;
+        WeightBuffer norm_attn_beta;
+        WeightBuffer norm_ffn_gamma;
+        WeightBuffer norm_ffn_beta;
+        
+        bool is_loaded = false;
+        uint32_t layer_idx = 0;
+    };
+    
+    // Embedding and output weights
+    struct EmbeddingWeights {
+        WeightBuffer token_embedding;
+        WeightBuffer position_embedding;
+        WeightBuffer output_projection;
+        WeightBuffer output_bias;
+        bool is_loaded = false;
+    };
+    
+private:
+    
+    // Weight loading and binding
+    ExpectedVoid load_layer_weights(uint32_t layer_idx);
+    ExpectedVoid load_all_weights();
+    void unload_layer_weights(uint32_t layer_idx);
+    
+    // Load specific tensor weight from GGUF
+    Expected<WeightBuffer> load_weight_buffer(const std::string& tensor_name);
+    Expected<WeightBuffer> load_weight_buffer_cached(const std::string& tensor_name);
+    
+    // Bind weights to descriptor set for compute
+    ExpectedVoid bind_weight_to_descriptor(VkDescriptorSet descriptor_set, 
+                                           uint32_t binding,
+                                           const WeightBuffer& weight);
+    
+    // Weight management
+    void evict_unused_weights(uint64_t max_age_ns);
+    size_t get_weights_memory_usage() const;
+    void clear_all_weights();
+    
+    // Get layer weights (loads if needed)
+    Expected<LayerWeights*> get_layer_weights(uint32_t layer_idx);
+    Expected<EmbeddingWeights*> get_embedding_weights();
+    
+    // Tensor name helpers
+    std::string get_tensor_name(const std::string& prefix, uint32_t layer_idx, 
+                                const std::string& suffix);
+    std::vector<std::string> get_layer_tensor_names(uint32_t layer_idx);
+    
+    // Async weight loading
+    void prefetch_weights_async(uint32_t start_layer, uint32_t end_layer);
+    
+    // ============================================================================
+    // Enhanced inference with weight binding
+    // ============================================================================
+    
+    Expected<std::vector<float>> attention_with_weights(
+        const std::vector<float>& hidden, 
+        uint32_t layer_idx,
+        const LayerWeights& weights);
+    
+    Expected<std::vector<float>> feed_forward_with_weights(
+        const std::vector<float>& hidden,
+        uint32_t layer_idx, 
+        const LayerWeights& weights);
+    
+    Expected<std::vector<float>> rms_norm_with_weights(
+        const std::vector<float>& hidden,
+        const WeightBuffer& gamma,
+        const WeightBuffer* beta);
+    
+    Expected<std::vector<float>> embed_tokens_with_weights(
+        const std::vector<uint32_t>& tokens);
+    
+    Expected<std::vector<float>> final_projection_with_weights(
+        const std::vector<float>& hidden);
+    
     // Time helpers
     static uint64_t get_current_time_ns();
 };

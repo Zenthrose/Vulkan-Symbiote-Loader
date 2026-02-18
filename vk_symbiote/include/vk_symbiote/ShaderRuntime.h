@@ -111,6 +111,7 @@ public:
     VkPipeline get_feedforward_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_rms_norm_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_final_linear_pipeline(const ShaderSpecialization& spec);
+    VkPipeline get_embedding_lookup_pipeline(const ShaderSpecialization& spec);
     
     // Shader compilation
     Expected<VkShaderModule> compile_compute_shader(const std::string& glsl_source,

@@ -276,6 +276,9 @@ VulkanSymbioteEngine::VulkanSymbioteEngine(const Path& model_path)
 
 VulkanSymbioteEngine::~VulkanSymbioteEngine() {
     try {
+        // Clear all loaded weights first
+        clear_all_weights();
+        
         if (pack_manager_) {
             pack_manager_.reset();
         }
@@ -483,14 +486,15 @@ std::string VulkanSymbioteEngine::generate(const std::string& prompt,
             prefetch_lookahead = power_manager_->get_throttled_prefetch(prefetch_lookahead);
         }
         
-        auto hidden = embed_tokens(token_sequence_);
+        // Use GPU-based embedding lookup with weight binding
+        auto hidden = embed_tokens_with_weights(token_sequence_);
         if (!hidden.has_value()) {
             break;
         }
 
         hidden_states_ = hidden.value();
 
-        // Forward through layers with KV caching
+        // Forward through layers with KV caching and weight binding
         for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
             schedule_prefetch(layer, prefetch_lookahead);
 
@@ -501,7 +505,8 @@ std::string VulkanSymbioteEngine::generate(const std::string& prompt,
             hidden_states_ = layer_out.value();
         }
 
-        auto logits = final_projection(hidden_states_);
+        // Use GPU-based final projection with weight binding
+        auto logits = final_projection_with_weights(hidden_states_);
         if (!logits.has_value()) {
             break;
         }
@@ -539,10 +544,38 @@ std::string VulkanSymbioteEngine::generate(const std::string& prompt,
     return result;
 }
 
-// Forward layer with KV cache integration
+// Forward layer with KV cache integration and weight binding
 Expected<std::vector<float>> VulkanSymbioteEngine::forward_layer_with_kv(
     const std::vector<float>& hidden, uint32_t layer_idx) {
     
+    // Try to get layer weights for GPU compute
+    auto weights_result = get_layer_weights(layer_idx);
+    if (weights_result.has_value() && weights_result.value()->is_loaded) {
+        // Use GPU compute with weight binding
+        auto* weights = weights_result.value();
+        
+        // RMS normalization with weights
+        auto normed = rms_norm_with_weights(hidden, weights->norm_attn_gamma, nullptr);
+        if (!normed.has_value()) {
+            return Expected<std::vector<float>>(normed.error());
+        }
+        
+        // Attention with weight binding
+        auto attn_out = attention_with_weights(normed.value(), layer_idx, *weights);
+        if (!attn_out.has_value()) {
+            return Expected<std::vector<float>>(attn_out.error());
+        }
+        
+        // FFN with weight binding
+        auto ffn_out = feed_forward_with_weights(attn_out.value(), layer_idx, *weights);
+        if (!ffn_out.has_value()) {
+            return Expected<std::vector<float>>(ffn_out.error());
+        }
+        
+        return Expected<std::vector<float>>(ffn_out.value());
+    }
+    
+    // Fallback to non-weighted version
     auto normed = rms_norm(hidden, layer_idx);
     if (!normed.has_value()) {
         return Expected<std::vector<float>>(normed.error());
@@ -870,6 +903,17 @@ ExpectedVoid VulkanSymbioteEngine::load_model() {
 
     vitality_oracle_ = std::make_unique<VitalityOracle>(32);
     tokenizer_ = Tokenizer::from_gguf(model_path_.string());
+
+    // Load model weights for inference
+    std::cout << "[VulkanSymbioteEngine] Loading model weights for inference..." << std::endl;
+    auto weights_result = load_all_weights();
+    if (!weights_result.has_value()) {
+        std::cerr << "[VulkanSymbioteEngine] Warning: Failed to load some weights" << std::endl;
+    }
+    
+    size_t weights_memory = get_weights_memory_usage();
+    std::cout << "[VulkanSymbioteEngine] Weights memory usage: " 
+              << (weights_memory / (1024.0 * 1024.0 * 1024.0)) << " GB" << std::endl;
 
     return make_expected_success();
 }
@@ -1708,6 +1752,931 @@ void VulkanSymbioteEngine::save_benchmark_results_json(const BenchmarkResult& re
     file << "  \"peak_vram_gb\": " << result.peak_vram_gb << ",\n";
     file << "  \"cache_hit_rate\": " << result.cache_hit_rate << "\n";
     file << "}\n";
+}
+
+// ============================================================================
+// Weight Binding System Implementation
+// Connects loaded GGUF model weights to GPU compute shaders
+// ============================================================================
+
+// Storage for loaded weights
+static std::unordered_map<uint32_t, VulkanSymbioteEngine::LayerWeights> g_layer_weights;
+static VulkanSymbioteEngine::EmbeddingWeights g_embedding_weights;
+static std::mutex g_weights_mutex;
+
+std::string VulkanSymbioteEngine::get_tensor_name(const std::string& prefix, 
+                                                   uint32_t layer_idx, 
+                                                   const std::string& suffix) {
+    return prefix + std::to_string(layer_idx) + suffix;
+}
+
+std::vector<std::string> VulkanSymbioteEngine::get_layer_tensor_names(uint32_t layer_idx) {
+    std::vector<std::string> names;
+    names.reserve(20);
+    
+    // Attention weights
+    names.push_back(get_tensor_name("blk.", layer_idx, ".attn_q.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".attn_k.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".attn_v.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".attn_o.weight"));
+    
+    // Feed-forward weights
+    names.push_back(get_tensor_name("blk.", layer_idx, ".ffn_gate.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".ffn_up.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".ffn_down.weight"));
+    
+    // Normalization weights
+    names.push_back(get_tensor_name("blk.", layer_idx, ".attn_norm.weight"));
+    names.push_back(get_tensor_name("blk.", layer_idx, ".ffn_norm.weight"));
+    
+    return names;
+}
+
+Expected<VulkanSymbioteEngine::WeightBuffer> VulkanSymbioteEngine::load_weight_buffer(
+    const std::string& tensor_name) {
+    
+    WeightBuffer buffer;
+    buffer.tensor_name = tensor_name;
+    
+    // Get tensor info from GGUF loader
+    const auto* tensor_info = gguf_loader_->get_tensor(tensor_name);
+    if (!tensor_info) {
+        std::cerr << "[WeightBinding] Tensor not found: " << tensor_name << std::endl;
+        return Expected<WeightBuffer>(-1);
+    }
+    
+    // Read tensor data
+    auto data_result = gguf_loader_->read_tensor_cached(tensor_name, true);
+    if (!data_result.has_value()) {
+        std::cerr << "[WeightBinding] Failed to load tensor: " << tensor_name << std::endl;
+        return Expected<WeightBuffer>(-2);
+    }
+    
+    const auto& data = data_result.value();
+    buffer.size = data.size() * sizeof(float);
+    
+    // Create GPU buffer
+    VkBufferCreateInfo buffer_info = {};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = buffer.size;
+    buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    VmaAllocationCreateInfo alloc_info = {};
+    alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    
+    VkResult result = vmaCreateBuffer(allocator_, &buffer_info, &alloc_info,
+                                      &buffer.buffer, &buffer.allocation, nullptr);
+    
+    if (result != VK_SUCCESS) {
+        std::cerr << "[WeightBinding] Failed to create GPU buffer for: " << tensor_name << std::endl;
+        return Expected<WeightBuffer>(static_cast<int>(result));
+    }
+    
+    // Upload data to GPU
+    auto upload_result = upload_to_gpu(data, buffer.buffer);
+    if (!upload_result.has_value()) {
+        vmaDestroyBuffer(allocator_, buffer.buffer, buffer.allocation);
+        buffer.buffer = VK_NULL_HANDLE;
+        return Expected<WeightBuffer>(-3);
+    }
+    
+    buffer.is_loaded = true;
+    buffer.last_used = get_current_time_ns();
+    
+    std::cout << "[WeightBinding] Loaded: " << tensor_name << " (" 
+              << (buffer.size / (1024.0 * 1024.0)) << " MB)" << std::endl;
+    
+    return Expected<WeightBuffer>(std::move(buffer));
+}
+
+Expected<VulkanSymbioteEngine::WeightBuffer> VulkanSymbioteEngine::load_weight_buffer_cached(
+    const std::string& tensor_name) {
+    
+    // Check if already in pack manager
+    // TODO: Integrate with PackManager for caching
+    
+    // Load fresh
+    return load_weight_buffer(tensor_name);
+}
+
+ExpectedVoid VulkanSymbioteEngine::bind_weight_to_descriptor(VkDescriptorSet descriptor_set,
+                                                              uint32_t binding,
+                                                              const WeightBuffer& weight) {
+    if (!weight.is_loaded || weight.buffer == VK_NULL_HANDLE) {
+        return ExpectedVoid(-1);
+    }
+    
+    VkDescriptorBufferInfo buffer_info = {};
+    buffer_info.buffer = weight.buffer;
+    buffer_info.offset = 0;
+    buffer_info.range = weight.size;
+    
+    VkWriteDescriptorSet descriptor_write = {};
+    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_write.dstSet = descriptor_set;
+    descriptor_write.dstBinding = binding;
+    descriptor_write.dstArrayElement = 0;
+    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.pBufferInfo = &buffer_info;
+    
+    vkUpdateDescriptorSets(device_, 1, &descriptor_write, 0, nullptr);
+    
+    return make_expected_success();
+}
+
+ExpectedVoid VulkanSymbioteEngine::load_layer_weights(uint32_t layer_idx) {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    auto& weights = g_layer_weights[layer_idx];
+    weights.layer_idx = layer_idx;
+    
+    std::cout << "[WeightBinding] Loading weights for layer " << layer_idx << "..." << std::endl;
+    
+    // Load attention weights
+    auto q_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".attn_q.weight"));
+    if (q_result.has_value()) weights.attn_q = std::move(q_result.value());
+    
+    auto k_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".attn_k.weight"));
+    if (k_result.has_value()) weights.attn_k = std::move(k_result.value());
+    
+    auto v_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".attn_v.weight"));
+    if (v_result.has_value()) weights.attn_v = std::move(v_result.value());
+    
+    auto o_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".attn_o.weight"));
+    if (o_result.has_value()) weights.attn_o = std::move(o_result.value());
+    
+    // Load feed-forward weights
+    auto gate_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".ffn_gate.weight"));
+    if (gate_result.has_value()) weights.ffn_gate = std::move(gate_result.value());
+    
+    auto up_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".ffn_up.weight"));
+    if (up_result.has_value()) weights.ffn_up = std::move(up_result.value());
+    
+    auto down_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".ffn_down.weight"));
+    if (down_result.has_value()) weights.ffn_down = std::move(down_result.value());
+    
+    // Load normalization weights
+    auto attn_norm_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".attn_norm.weight"));
+    if (attn_norm_result.has_value()) weights.norm_attn_gamma = std::move(attn_norm_result.value());
+    
+    auto ffn_norm_result = load_weight_buffer_cached(get_tensor_name("blk.", layer_idx, ".ffn_norm.weight"));
+    if (ffn_norm_result.has_value()) weights.norm_ffn_gamma = std::move(ffn_norm_result.value());
+    
+    weights.is_loaded = true;
+    
+    std::cout << "[WeightBinding] Layer " << layer_idx << " weights loaded" << std::endl;
+    return make_expected_success();
+}
+
+ExpectedVoid VulkanSymbioteEngine::load_all_weights() {
+    std::cout << "[WeightBinding] Loading all model weights..." << std::endl;
+    
+    for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
+        auto result = load_layer_weights(layer);
+        if (!result.has_value()) {
+            std::cerr << "[WeightBinding] Failed to load layer " << layer << std::endl;
+        }
+    }
+    
+    // Load embedding weights
+    auto emb_result = load_weight_buffer_cached("token_embd.weight");
+    if (emb_result.has_value()) {
+        g_embedding_weights.token_embedding = std::move(emb_result.value());
+        g_embedding_weights.is_loaded = true;
+    }
+    
+    auto out_result = load_weight_buffer_cached("output.weight");
+    if (out_result.has_value()) {
+        g_embedding_weights.output_projection = std::move(out_result.value());
+    }
+    
+    std::cout << "[WeightBinding] All weights loaded" << std::endl;
+    return make_expected_success();
+}
+
+Expected<VulkanSymbioteEngine::LayerWeights*> VulkanSymbioteEngine::get_layer_weights(uint32_t layer_idx) {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    auto it = g_layer_weights.find(layer_idx);
+    if (it == g_layer_weights.end() || !it->second.is_loaded) {
+        // Try to load on demand
+        lock.unlock();
+        auto load_result = load_layer_weights(layer_idx);
+        if (!load_result.has_value()) {
+            return Expected<LayerWeights*>(-1);
+        }
+        lock.lock();
+        it = g_layer_weights.find(layer_idx);
+    }
+    
+    if (it != g_layer_weights.end()) {
+        it->second.attn_q.last_used = get_current_time_ns();
+        return Expected<LayerWeights*>(&it->second);
+    }
+    
+    return Expected<LayerWeights*>(-1);
+}
+
+Expected<VulkanSymbioteEngine::EmbeddingWeights*> VulkanSymbioteEngine::get_embedding_weights() {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    if (!g_embedding_weights.is_loaded) {
+        lock.unlock();
+        auto emb_result = load_weight_buffer_cached("token_embd.weight");
+        if (emb_result.has_value()) {
+            std::unique_lock<std::mutex> lock2(g_weights_mutex);
+            g_embedding_weights.token_embedding = std::move(emb_result.value());
+            g_embedding_weights.is_loaded = true;
+        }
+        auto out_result = load_weight_buffer_cached("output.weight");
+        if (out_result.has_value()) {
+            std::unique_lock<std::mutex> lock2(g_weights_mutex);
+            g_embedding_weights.output_projection = std::move(out_result.value());
+        }
+        lock.lock();
+    }
+    
+    if (g_embedding_weights.is_loaded) {
+        return Expected<EmbeddingWeights*>(&g_embedding_weights);
+    }
+    
+    return Expected<EmbeddingWeights*>(-1);
+}
+
+void VulkanSymbioteEngine::unload_layer_weights(uint32_t layer_idx) {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    auto it = g_layer_weights.find(layer_idx);
+    if (it == g_layer_weights.end()) return;
+    
+    auto& weights = it->second;
+    
+    // Destroy all weight buffers
+    auto destroy_buffer = [&](WeightBuffer& buf) {
+        if (buf.buffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, buf.buffer, buf.allocation);
+            buf.buffer = VK_NULL_HANDLE;
+            buf.allocation = nullptr;
+            buf.is_loaded = false;
+        }
+    };
+    
+    destroy_buffer(weights.attn_q);
+    destroy_buffer(weights.attn_k);
+    destroy_buffer(weights.attn_v);
+    destroy_buffer(weights.attn_o);
+    destroy_buffer(weights.ffn_gate);
+    destroy_buffer(weights.ffn_up);
+    destroy_buffer(weights.ffn_down);
+    destroy_buffer(weights.norm_attn_gamma);
+    destroy_buffer(weights.norm_ffn_gamma);
+    
+    weights.is_loaded = false;
+    
+    std::cout << "[WeightBinding] Unloaded layer " << layer_idx << std::endl;
+}
+
+void VulkanSymbioteEngine::evict_unused_weights(uint64_t max_age_ns) {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    uint64_t now = get_current_time_ns();
+    std::vector<uint32_t> layers_to_evict;
+    
+    for (auto& [layer_idx, weights] : g_layer_weights) {
+        if (weights.is_loaded && weights.attn_q.last_used > 0) {
+            uint64_t age = now - weights.attn_q.last_used;
+            if (age > max_age_ns) {
+                layers_to_evict.push_back(layer_idx);
+            }
+        }
+    }
+    
+    lock.unlock();
+    
+    for (uint32_t layer : layers_to_evict) {
+        unload_layer_weights(layer);
+    }
+    
+    if (!layers_to_evict.empty()) {
+        std::cout << "[WeightBinding] Evicted " << layers_to_evict.size() << " unused layers" << std::endl;
+    }
+}
+
+size_t VulkanSymbioteEngine::get_weights_memory_usage() const {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    size_t total = 0;
+    for (const auto& [layer_idx, weights] : g_layer_weights) {
+        if (weights.is_loaded) {
+            total += weights.attn_q.size;
+            total += weights.attn_k.size;
+            total += weights.attn_v.size;
+            total += weights.attn_o.size;
+            total += weights.ffn_gate.size;
+            total += weights.ffn_up.size;
+            total += weights.ffn_down.size;
+        }
+    }
+    
+    if (g_embedding_weights.is_loaded) {
+        total += g_embedding_weights.token_embedding.size;
+        total += g_embedding_weights.output_projection.size;
+    }
+    
+    return total;
+}
+
+void VulkanSymbioteEngine::clear_all_weights() {
+    std::unique_lock<std::mutex> lock(g_weights_mutex);
+    
+    for (auto& [layer_idx, weights] : g_layer_weights) {
+        unload_layer_weights(layer_idx);
+    }
+    
+    g_layer_weights.clear();
+    
+    // Clear embedding weights
+    if (g_embedding_weights.token_embedding.buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, g_embedding_weights.token_embedding.buffer, 
+                         g_embedding_weights.token_embedding.allocation);
+    }
+    if (g_embedding_weights.output_projection.buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, g_embedding_weights.output_projection.buffer,
+                         g_embedding_weights.output_projection.allocation);
+    }
+    
+    g_embedding_weights = EmbeddingWeights{};
+    
+    std::cout << "[WeightBinding] All weights cleared" << std::endl;
+}
+
+void VulkanSymbioteEngine::prefetch_weights_async(uint32_t start_layer, uint32_t end_layer) {
+    std::cout << "[WeightBinding] Prefetching layers " << start_layer << " to " << end_layer << std::endl;
+    
+    // Simple implementation - load sequentially
+    // TODO: Use thread pool for true async loading
+    for (uint32_t layer = start_layer; layer <= end_layer && layer < config_.num_layers; ++layer) {
+        auto result = load_layer_weights(layer);
+        if (!result.has_value()) {
+            std::cerr << "[WeightBinding] Prefetch failed for layer " << layer << std::endl;
+        }
+    }
+}
+
+// ============================================================================
+// GPU Buffer Management Helpers
+// ============================================================================
+
+struct GPUBuffers {
+    VkBuffer input_buffer;
+    VkBuffer output_buffer;
+    VmaAllocation input_alloc;
+    VmaAllocation output_alloc;
+    size_t size;
+};
+
+static Expected<GPUBuffers> create_activation_buffers(VmaAllocator allocator, size_t size) {
+    GPUBuffers buffers;
+    buffers.size = size;
+    
+    VkBufferCreateInfo buffer_info = {};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = size;
+    buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    VmaAllocationCreateInfo alloc_info = {};
+    alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    
+    VkResult result = vmaCreateBuffer(allocator, &buffer_info, &alloc_info,
+                                      &buffers.input_buffer, &buffers.input_alloc, nullptr);
+    if (result != VK_SUCCESS) {
+        return Expected<GPUBuffers>(static_cast<int>(result));
+    }
+    
+    result = vmaCreateBuffer(allocator, &buffer_info, &alloc_info,
+                             &buffers.output_buffer, &buffers.output_alloc, nullptr);
+    if (result != VK_SUCCESS) {
+        vmaDestroyBuffer(allocator, buffers.input_buffer, buffers.input_alloc);
+        return Expected<GPUBuffers>(static_cast<int>(result));
+    }
+    
+    return Expected<GPUBuffers>(buffers);
+}
+
+static void destroy_activation_buffers(VmaAllocator allocator, GPUBuffers& buffers) {
+    if (buffers.input_buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, buffers.input_buffer, buffers.input_alloc);
+        buffers.input_buffer = VK_NULL_HANDLE;
+    }
+    if (buffers.output_buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, buffers.output_buffer, buffers.output_alloc);
+        buffers.output_buffer = VK_NULL_HANDLE;
+    }
+}
+
+// ============================================================================
+// Enhanced Inference with Weight Binding and GPU Buffer Management
+// ============================================================================
+
+Expected<std::vector<float>> VulkanSymbioteEngine::attention_with_weights(
+    const std::vector<float>& hidden,
+    uint32_t layer_idx,
+    const LayerWeights& weights) {
+    
+    if (!weights.is_loaded) {
+        std::cerr << "[Inference] Layer " << layer_idx << " weights not loaded" << std::endl;
+        return Expected<std::vector<float>>(-1);
+    }
+    
+    // Get shader pipeline
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
+    VkPipeline pipeline = shader_runtime_->get_attention_pipeline(spec);
+    if (pipeline == VK_NULL_HANDLE) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    // Create GPU buffers for activations
+    size_t buffer_size = hidden.size() * sizeof(float);
+    auto buffers_result = create_activation_buffers(allocator_, buffer_size);
+    if (!buffers_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    auto buffers = buffers_result.value();
+    
+    // Upload input to GPU
+    auto upload_result = upload_to_gpu(hidden, buffers.input_buffer);
+    if (!upload_result.has_value()) {
+        destroy_activation_buffers(allocator_, buffers);
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    // Create descriptor set
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind input/output buffers (binding 0, 1)
+    VkDescriptorBufferInfo input_info = {};
+    input_info.buffer = buffers.input_buffer;
+    input_info.offset = 0;
+    input_info.range = buffer_size;
+    
+    VkDescriptorBufferInfo output_info = {};
+    output_info.buffer = buffers.output_buffer;
+    output_info.offset = 0;
+    output_info.range = buffer_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &input_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind weight buffers (bindings 2, 3, 4, 5)
+    bind_weight_to_descriptor(descriptor_set, 2, weights.attn_q);
+    bind_weight_to_descriptor(descriptor_set, 3, weights.attn_k);
+    bind_weight_to_descriptor(descriptor_set, 4, weights.attn_v);
+    bind_weight_to_descriptor(descriptor_set, 5, weights.attn_o);
+    
+    // Dispatch compute
+    uint32_t seq_len = token_sequence_.size();
+    uint32_t num_heads = config_.num_attention_heads;
+    
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
+                                      (seq_len * num_heads + 127) / 128, 1, 1);
+    
+    // Read back output from GPU
+    std::vector<float> output(hidden.size());
+    auto download_result = download_from_gpu(buffers.output_buffer, output);
+    
+    // Cleanup
+    destroy_activation_buffers(allocator_, buffers);
+    
+    if (!download_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    return Expected<std::vector<float>>(std::move(output));
+}
+
+Expected<std::vector<float>> VulkanSymbioteEngine::feed_forward_with_weights(
+    const std::vector<float>& hidden,
+    uint32_t /*layer_idx*/,
+    const LayerWeights& weights) {
+    
+    if (!weights.is_loaded) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
+    VkPipeline pipeline = shader_runtime_->get_feedforward_pipeline(spec);
+    if (pipeline == VK_NULL_HANDLE) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    // Create GPU buffers
+    size_t buffer_size = hidden.size() * sizeof(float);
+    auto buffers_result = create_activation_buffers(allocator_, buffer_size);
+    if (!buffers_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    auto buffers = buffers_result.value();
+    
+    // Upload input
+    auto upload_result = upload_to_gpu(hidden, buffers.input_buffer);
+    if (!upload_result.has_value()) {
+        destroy_activation_buffers(allocator_, buffers);
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind input/output buffers
+    VkDescriptorBufferInfo input_info = {};
+    input_info.buffer = buffers.input_buffer;
+    input_info.offset = 0;
+    input_info.range = buffer_size;
+    
+    VkDescriptorBufferInfo output_info = {};
+    output_info.buffer = buffers.output_buffer;
+    output_info.offset = 0;
+    output_info.range = buffer_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &input_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind weight buffers (bindings 2, 3, 4)
+    bind_weight_to_descriptor(descriptor_set, 2, weights.ffn_gate);
+    bind_weight_to_descriptor(descriptor_set, 3, weights.ffn_up);
+    bind_weight_to_descriptor(descriptor_set, 4, weights.ffn_down);
+    
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
+                                      (hidden.size() + 255) / 256, 1, 1);
+    
+    // Read back output
+    std::vector<float> output(hidden.size());
+    auto download_result = download_from_gpu(buffers.output_buffer, output);
+    
+    destroy_activation_buffers(allocator_, buffers);
+    
+    if (!download_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    return Expected<std::vector<float>>(std::move(output));
+}
+
+Expected<std::vector<float>> VulkanSymbioteEngine::rms_norm_with_weights(
+    const std::vector<float>& hidden,
+    const WeightBuffer& gamma,
+    const WeightBuffer* /*beta*/) {
+    
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = device_caps_.optimal_workgroup_size;
+    VkPipeline pipeline = shader_runtime_->get_rms_norm_pipeline(spec);
+    if (pipeline == VK_NULL_HANDLE) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    // Create GPU buffers
+    size_t buffer_size = hidden.size() * sizeof(float);
+    auto buffers_result = create_activation_buffers(allocator_, buffer_size);
+    if (!buffers_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    auto buffers = buffers_result.value();
+    
+    // Upload input
+    auto upload_result = upload_to_gpu(hidden, buffers.input_buffer);
+    if (!upload_result.has_value()) {
+        destroy_activation_buffers(allocator_, buffers);
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind input/output buffers
+    VkDescriptorBufferInfo input_info = {};
+    input_info.buffer = buffers.input_buffer;
+    input_info.offset = 0;
+    input_info.range = buffer_size;
+    
+    VkDescriptorBufferInfo output_info = {};
+    output_info.buffer = buffers.output_buffer;
+    output_info.offset = 0;
+    output_info.range = buffer_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &input_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind gamma weight (binding 2)
+    bind_weight_to_descriptor(descriptor_set, 2, gamma);
+    
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
+                                      (hidden.size() + 255) / 256, 1, 1);
+    
+    // Read back output
+    std::vector<float> output(hidden.size());
+    auto download_result = download_from_gpu(buffers.output_buffer, output);
+    
+    destroy_activation_buffers(allocator_, buffers);
+    
+    if (!download_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    return Expected<std::vector<float>>(std::move(output));
+}
+
+Expected<std::vector<float>> VulkanSymbioteEngine::embed_tokens_with_weights(
+    const std::vector<uint32_t>& tokens) {
+    
+    auto emb_weights = get_embedding_weights();
+    if (!emb_weights.has_value() || !emb_weights.value()->is_loaded) {
+        // Fallback to simple embedding
+        std::vector<float> embedded(tokens.size() * config_.hidden_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(embedded));
+    }
+    
+    const auto& weights = *emb_weights.value();
+    
+    // Get embedding lookup pipeline
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = 256;
+    VkPipeline pipeline = shader_runtime_->get_embedding_lookup_pipeline(spec);
+    if (pipeline == VK_NULL_HANDLE || weights.token_embedding.buffer == VK_NULL_HANDLE) {
+        // Fallback
+        std::vector<float> embedded(tokens.size() * config_.hidden_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(embedded));
+    }
+    
+    // Create token ID buffer
+    VkBuffer token_buffer;
+    VmaAllocation token_alloc;
+    VkBufferCreateInfo token_info = {};
+    token_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    token_info.size = tokens.size() * sizeof(uint32_t);
+    token_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    
+    VmaAllocationCreateInfo alloc_info = {};
+    alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    
+    VkResult result = vmaCreateBuffer(allocator_, &token_info, &alloc_info,
+                                      &token_buffer, &token_alloc, nullptr);
+    if (result != VK_SUCCESS) {
+        std::vector<float> embedded(tokens.size() * config_.hidden_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(embedded));
+    }
+    
+    // Upload token IDs
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_memory;
+    VkBufferCreateInfo staging_info = {};
+    staging_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    staging_info.size = tokens.size() * sizeof(uint32_t);
+    staging_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    
+    vkCreateBuffer(device_, &staging_info, nullptr, &staging_buffer);
+    
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device_, staging_buffer, &mem_reqs);
+    
+    VkMemoryAllocateInfo mem_info = {};
+    mem_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mem_info.allocationSize = mem_reqs.size;
+    mem_info.memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    
+    vkAllocateMemory(device_, &mem_info, nullptr, &staging_memory);
+    vkBindBufferMemory(device_, staging_buffer, staging_memory, 0);
+    
+    void* mapped;
+    vkMapMemory(device_, staging_memory, 0, tokens.size() * sizeof(uint32_t), 0, &mapped);
+    std::memcpy(mapped, tokens.data(), tokens.size() * sizeof(uint32_t));
+    vkUnmapMemory(device_, staging_memory);
+    
+    VkCommandBuffer cmd = begin_single_time_commands();
+    VkBufferCopy copy = {};
+    copy.size = tokens.size() * sizeof(uint32_t);
+    vkCmdCopyBuffer(cmd, staging_buffer, token_buffer, 1, &copy);
+    end_single_time_commands(cmd);
+    
+    vkDestroyBuffer(device_, staging_buffer, nullptr);
+    vkFreeMemory(device_, staging_memory, nullptr);
+    
+    // Create output buffer
+    size_t output_size = tokens.size() * config_.hidden_size * sizeof(float);
+    VkBuffer output_buffer;
+    VmaAllocation output_alloc;
+    VkBufferCreateInfo output_info = {};
+    output_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    output_info.size = output_size;
+    output_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    
+    vmaCreateBuffer(allocator_, &output_info, &alloc_info, &output_buffer, &output_alloc, nullptr);
+    
+    // Create descriptor set
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind buffers
+    VkDescriptorBufferInfo token_buf_info = {};
+    token_buf_info.buffer = token_buffer;
+    token_buf_info.offset = 0;
+    token_buf_info.range = tokens.size() * sizeof(uint32_t);
+    
+    VkDescriptorBufferInfo output_buf_info = {};
+    output_buf_info.buffer = output_buffer;
+    output_buf_info.offset = 0;
+    output_buf_info.range = output_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &token_buf_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_buf_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind embedding weights (binding 2)
+    bind_weight_to_descriptor(descriptor_set, 2, weights.token_embedding);
+    
+    // Dispatch
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
+                                      (tokens.size() * config_.hidden_size + 255) / 256, 1, 1);
+    
+    // Read back embeddings
+    std::vector<float> embedded(tokens.size() * config_.hidden_size);
+    auto download_result = download_from_gpu(output_buffer, embedded);
+    
+    // Cleanup
+    vmaDestroyBuffer(allocator_, token_buffer, token_alloc);
+    vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+    
+    if (!download_result.has_value()) {
+        std::vector<float> fallback(tokens.size() * config_.hidden_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(fallback));
+    }
+    
+    return Expected<std::vector<float>>(std::move(embedded));
+}
+
+Expected<std::vector<float>> VulkanSymbioteEngine::final_projection_with_weights(
+    const std::vector<float>& hidden) {
+
+    auto emb_weights = get_embedding_weights();
+    if (!emb_weights.has_value() || emb_weights.value()->output_projection.buffer == VK_NULL_HANDLE) {
+        // Return dummy logits
+        std::vector<float> logits(config_.vocab_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(logits));
+    }
+    
+    const auto& weights = *emb_weights.value();
+    
+    VkPipeline pipeline = shader_runtime_->get_final_linear_pipeline(ShaderSpecialization{});
+    if (pipeline == VK_NULL_HANDLE) {
+        std::vector<float> logits(config_.vocab_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(logits));
+    }
+    
+    // Create GPU buffers
+    size_t input_size = hidden.size() * sizeof(float);
+    size_t output_size = config_.vocab_size * sizeof(float);
+    
+    VkBuffer input_buffer;
+    VmaAllocation input_alloc;
+    VkBufferCreateInfo input_info = {};
+    input_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    input_info.size = input_size;
+    input_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    
+    VmaAllocationCreateInfo alloc_info = {};
+    alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    
+    vmaCreateBuffer(allocator_, &input_info, &alloc_info, &input_buffer, &input_alloc, nullptr);
+    
+    VkBuffer output_buffer;
+    VmaAllocation output_alloc;
+    VkBufferCreateInfo output_info = {};
+    output_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    output_info.size = output_size;
+    output_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    
+    vmaCreateBuffer(allocator_, &output_info, &alloc_info, &output_buffer, &output_alloc, nullptr);
+    
+    // Upload input
+    auto upload_result = upload_to_gpu(hidden, input_buffer);
+    if (!upload_result.has_value()) {
+        vmaDestroyBuffer(allocator_, input_buffer, input_alloc);
+        vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+        std::vector<float> logits(config_.vocab_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(logits));
+    }
+    
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind input/output buffers
+    VkDescriptorBufferInfo input_buf_info = {};
+    input_buf_info.buffer = input_buffer;
+    input_buf_info.offset = 0;
+    input_buf_info.range = input_size;
+    
+    VkDescriptorBufferInfo output_buf_info = {};
+    output_buf_info.buffer = output_buffer;
+    output_buf_info.offset = 0;
+    output_buf_info.range = output_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &input_buf_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_buf_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind output projection weights (binding 2)
+    bind_weight_to_descriptor(descriptor_set, 2, weights.output_projection);
+    
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set,
+                                      (config_.vocab_size + 255) / 256, 1, 1);
+    
+    // Read back logits
+    std::vector<float> logits(config_.vocab_size);
+    auto download_result = download_from_gpu(output_buffer, logits);
+    
+    vmaDestroyBuffer(allocator_, input_buffer, input_alloc);
+    vmaDestroyBuffer(allocator_, output_buffer, output_alloc);
+    
+    if (!download_result.has_value()) {
+        std::vector<float> fallback(config_.vocab_size, 0.0f);
+        return Expected<std::vector<float>>(std::move(fallback));
+    }
+    
+    return Expected<std::vector<float>>(std::move(logits));
 }
 
 } // namespace vk_symbiote

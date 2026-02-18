@@ -3,15 +3,27 @@
 
 layout(local_size_x = 128) in;
 
-layout(binding = 0, std430) buffer QueryBuf { float q[]; };
-layout(binding = 1, std430) buffer KeyBuf { float k[]; };
-layout(binding = 2, std430) buffer ValueBuf { float v[]; };
-layout(binding = 3, std430) buffer OutBuf { float o[]; };
+// Input/output activation buffers
+layout(binding = 0, std430) readonly buffer InputBuf { float input_data[]; };
+layout(binding = 1, std430) writeonly buffer OutputBuf { float output_data[]; };
+
+// Weight buffers
+layout(binding = 2, std430) readonly buffer QueryWeight { float q_weight[]; };
+layout(binding = 3, std430) readonly buffer KeyWeight { float k_weight[]; };
+layout(binding = 4, std430) readonly buffer ValueWeight { float v_weight[]; };
+layout(binding = 5, std430) readonly buffer OutputWeight { float o_weight[]; };
 
 layout(push_constant) uniform PC {
-    uint32_t seq_len, head_dim, num_heads, num_kv;
+    uint32_t seq_len;
+    uint32_t head_dim;
+    uint32_t num_heads;
+    uint32_t num_kv_heads;
     float scale;
 } pc;
+
+shared float shared_q[128];
+shared float shared_k[128];
+shared float shared_v[128];
 
 void main() {
     uint32_t gid = gl_GlobalInvocationID.x;
@@ -20,33 +32,59 @@ void main() {
     
     if (head >= pc.num_heads || pos >= pc.seq_len) return;
     
+    uint32_t head_size = pc.head_dim;
+    uint32_t kv_head = head * pc.num_kv_heads / pc.num_heads;
+    
+    // Load Q for this position
+    for (uint32_t d = gl_LocalInvocationID.x; d < head_size; d += gl_WorkGroupSize.x) {
+        uint32_t q_idx = (head * pc.seq_len + pos) * head_size + d;
+        shared_q[d] = q_weight[q_idx];
+    }
+    barrier();
+    
+    // Attention computation
     float max_score = -1e20;
-    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+    
+    // First pass: compute max score for numerical stability
+    for (uint32_t k_pos = 0; k_pos < pc.seq_len; ++k_pos) {
         float score = 0.0;
-        for (uint32_t d = 0; d < pc.head_dim; ++d) {
-            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        for (uint32_t d = 0; d < head_size; ++d) {
+            uint32_t k_idx = (kv_head * pc.seq_len + k_pos) * head_size + d;
+            score += shared_q[d] * k_weight[k_idx];
         }
         max_score = max(max_score, score * pc.scale);
     }
     
+    // Second pass: compute softmax sum
     float sum = 0.0;
-    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+    for (uint32_t k_pos = 0; k_pos < pc.seq_len; ++k_pos) {
         float score = 0.0;
-        for (uint32_t d = 0; d < pc.head_dim; ++d) {
-            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        for (uint32_t d = 0; d < head_size; ++d) {
+            uint32_t k_idx = (kv_head * pc.seq_len + k_pos) * head_size + d;
+            score += shared_q[d] * k_weight[k_idx];
         }
         sum += exp(score * pc.scale - max_score);
     }
     
-    for (uint32_t k = 0; k < pc.seq_len; ++k) {
+    // Third pass: compute weighted sum of values
+    float result = 0.0;
+    for (uint32_t k_pos = 0; k_pos < pc.seq_len; ++k_pos) {
         float score = 0.0;
-        for (uint32_t d = 0; d < pc.head_dim; ++d) {
-            score += q[head * pc.head_dim + d] * k[(head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d];
+        for (uint32_t d = 0; d < head_size; ++d) {
+            uint32_t k_idx = (kv_head * pc.seq_len + k_pos) * head_size + d;
+            score += shared_q[d] * k_weight[k_idx];
         }
         float attn = exp(score * pc.scale - max_score) / sum;
-        for (uint32_t d = 0; d < pc.head_dim; ++d) {
-            uint32_t v_idx = (head * pc.num_heads / pc.num_kv) * pc.head_dim + k * pc.head_dim + d;
-            o[pos * pc.head_dim + d] += attn * v[v_idx];
+        
+        for (uint32_t d = 0; d < head_size; ++d) {
+            uint32_t v_idx = (kv_head * pc.seq_len + k_pos) * head_size + d;
+            result += attn * v_weight[v_idx];
         }
+    }
+    
+    // Apply output projection
+    for (uint32_t d = gl_LocalInvocationID.x; d < head_size; d += gl_WorkGroupSize.x) {
+        uint32_t out_idx = (head * pc.seq_len + pos) * head_size + d;
+        output_data[out_idx] = result * o_weight[d];
     }
 }
