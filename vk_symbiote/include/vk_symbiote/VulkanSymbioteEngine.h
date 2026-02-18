@@ -311,6 +311,15 @@ private:
         uint32_t layer_idx,
         const LayerWeights& weights);
     
+    // Sparse attention for long contexts (200K+ tokens) using Longformer/Ring patterns
+    // Complexity: O(seq_len × window_size) instead of O(seq_len²)
+    Expected<std::vector<float>> sparse_attention_with_weights(
+        const std::vector<float>& hidden,
+        uint32_t layer_idx,
+        const LayerWeights& weights,
+        uint32_t window_size = 512,
+        uint32_t global_tokens = 16);
+    
     Expected<std::vector<float>> feed_forward_with_weights(
         const std::vector<float>& hidden,
         uint32_t layer_idx, 

@@ -108,6 +108,7 @@ public:
     // Built-in shader templates
     VkPipeline get_fused_matmul_rope_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_attention_pipeline(const ShaderSpecialization& spec);
+    VkPipeline get_sparse_attention_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_feedforward_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_rms_norm_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_final_linear_pipeline(const ShaderSpecialization& spec);

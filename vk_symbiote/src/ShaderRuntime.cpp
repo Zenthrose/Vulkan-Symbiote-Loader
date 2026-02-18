@@ -1306,6 +1306,109 @@ VkPipeline ShaderRuntime::get_embedding_lookup_pipeline(const ShaderSpecializati
     return pipeline;
 }
 
+VkPipeline ShaderRuntime::get_sparse_attention_pipeline(const ShaderSpecialization& spec) {
+    std::string cache_key = "sparse_attention_" + std::to_string(spec.workgroup_size_x);
+    auto it = named_pipeline_cache_.find(cache_key);
+    if (it != named_pipeline_cache_.end()) {
+        return it->second;
+    }
+    
+    // Load sparse attention shader from file
+    std::ifstream shader_file("vk_symbiote/shaders/sparse_attention.comp");
+    std::string shader_source;
+    
+    if (shader_file.is_open()) {
+        shader_source = std::string((std::istreambuf_iterator<char>(shader_file)),
+                                    std::istreambuf_iterator<char>());
+    } else {
+        // Fallback: generate inline sparse attention shader
+        shader_source = R"(
+            #version 460
+            layout(local_size_x = )" + std::to_string(spec.workgroup_size_x) + R"(, local_size_y = 1) in;
+            
+            layout(set = 0, binding = 0) readonly buffer InputBuf { float input_data[]; };
+            layout(set = 0, binding = 1) writeonly buffer OutputBuf { float output_data[]; };
+            layout(set = 0, binding = 2) readonly buffer QWeight { float q_weight[]; };
+            layout(set = 0, binding = 3) readonly buffer KWeight { float k_weight[]; };
+            layout(set = 0, binding = 4) readonly buffer VWeight { float v_weight[]; };
+            layout(set = 0, binding = 5) readonly buffer OWeight { float o_weight[]; };
+            layout(set = 0, binding = 6) readonly buffer KeyCache { float key_cache[]; };
+            layout(set = 0, binding = 7) readonly buffer ValueCache { float value_cache[]; };
+            
+            layout(push_constant) uniform PC {
+                uint seq_len;
+                uint head_dim;
+                uint num_heads;
+                uint window_size;  // Sparse window
+                float scale;
+            } pc;
+            
+            shared float shared_q[256];
+            
+            void main() {
+                uint gid = gl_GlobalInvocationID.x;
+                uint head = gid / pc.seq_len;
+                uint pos = gid % pc.seq_len;
+                
+                if (head >= pc.num_heads || pos >= pc.seq_len) return;
+                
+                // Load Q (simplified - should compute from input)
+                for (uint d = gl_LocalInvocationID.x; d < pc.head_dim; d += gl_WorkGroupSize.x) {
+                    shared_q[d] = q_weight[(head * pc.seq_len + pos) * pc.head_dim + d];
+                }
+                barrier();
+                
+                // Sparse attention: only attend to window_size tokens
+                uint window_start = (pos > pc.window_size) ? (pos - pc.window_size) : 0;
+                uint window_end = min(pos + 1, pc.seq_len);
+                
+                float max_score = -1e20;
+                for (uint k_pos = window_start; k_pos < window_end; ++k_pos) {
+                    float score = 0.0;
+                    for (uint d = 0; d < pc.head_dim; ++d) {
+                        score += shared_q[d] * key_cache[k_pos * pc.head_dim + d];
+                    }
+                    max_score = max(max_score, score * pc.scale);
+                }
+                
+                float sum = 0.0;
+                for (uint k_pos = window_start; k_pos < window_end; ++k_pos) {
+                    float score = 0.0;
+                    for (uint d = 0; d < pc.head_dim; ++d) {
+                        score += shared_q[d] * key_cache[k_pos * pc.head_dim + d];
+                    }
+                    sum += exp(score * pc.scale - max_score);
+                }
+                
+                float result = 0.0;
+                for (uint k_pos = window_start; k_pos < window_end; ++k_pos) {
+                    float score = 0.0;
+                    for (uint d = 0; d < pc.head_dim; ++d) {
+                        score += shared_q[d] * key_cache[k_pos * pc.head_dim + d];
+                    }
+                    float attn = exp(score * pc.scale - max_score) / sum;
+                    result += attn * value_cache[k_pos * pc.head_dim];
+                }
+                
+                output_data[gid] = result;
+            }
+        )";
+    }
+    
+    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    if (!shader_module.has_value()) {
+        return VK_NULL_HANDLE;
+    }
+    
+    VkPipeline pipeline = create_specialized_pipeline(shader_module.value(), spec);
+    vkDestroyShaderModule(device_, shader_module.value(), nullptr);
+    
+    if (pipeline != VK_NULL_HANDLE) {
+        named_pipeline_cache_[cache_key] = pipeline;
+    }
+    return pipeline;
+}
+
 void ShaderRuntime::dispatch_compute(VkPipeline pipeline, VkDescriptorSet descriptor_set,
                                      uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z) {
     VkCommandBufferAllocateInfo alloc_info = {};

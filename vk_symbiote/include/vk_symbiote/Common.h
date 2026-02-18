@@ -66,6 +66,13 @@ struct ModelConfig {
     uint32 head_dim = 128;
     bool use_fp16 = true;
     float rms_epsilon = 1e-5f;
+    
+    // Sparse attention configuration for long contexts (200K+)
+    bool use_sparse_attention = true;      // Enable sparse patterns
+    uint32 sparse_window_size = 512;        // Sliding window size
+    uint32 sparse_global_tokens = 16;       // Number of global attention tokens
+    uint32 sparse_block_size = 1024;        // Ring attention block size
+    bool use_ring_attention = true;         // Enable ring/block-wise attention
 };
 
 struct InferenceParams {

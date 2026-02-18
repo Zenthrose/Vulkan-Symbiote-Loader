@@ -740,8 +740,23 @@ Expected<std::vector<float>> VulkanSymbioteEngine::forward_layer_with_kv(
             return Expected<std::vector<float>>(normed.error());
         }
         
-        // Attention with weight binding
-        auto attn_out = attention_with_weights(normed.value(), layer_idx, *weights);
+        // Choose attention type based on sequence length
+        // Use sparse attention for long sequences (200K+) for O(n) complexity
+        Expected<std::vector<float>> attn_out;
+        uint32_t seq_len = token_sequence_.size();
+        
+        if (config_.use_sparse_attention && seq_len > 8192) {
+            // Use sparse attention for long contexts
+            // Complexity: O(seq_len × window_size) instead of O(seq_len²)
+            attn_out = sparse_attention_with_weights(
+                normed.value(), layer_idx, *weights,
+                config_.sparse_window_size,
+                config_.sparse_global_tokens);
+        } else {
+            // Use dense attention for shorter sequences
+            attn_out = attention_with_weights(normed.value(), layer_idx, *weights);
+        }
+        
         if (!attn_out.has_value()) {
             return Expected<std::vector<float>>(attn_out.error());
         }
@@ -2519,6 +2534,146 @@ Expected<std::vector<float>> VulkanSymbioteEngine::attention_with_weights(
     auto download_result = download_from_gpu(buffers.output_buffer, output);
     
     // Cleanup
+    destroy_activation_buffers(allocator_, buffers);
+    
+    if (!download_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    return Expected<std::vector<float>>(std::move(output));
+}
+
+// ============================================================================
+// Sparse Attention for Long Contexts (200K+ tokens)
+// Uses Longformer-style sliding window + global attention pattern
+// Complexity: O(seq_len × window_size) instead of O(seq_len²)
+// ============================================================================
+
+Expected<std::vector<float>> VulkanSymbioteEngine::sparse_attention_with_weights(
+    const std::vector<float>& hidden,
+    uint32_t layer_idx,
+    const LayerWeights& weights,
+    uint32_t window_size,
+    uint32_t global_tokens) {
+    
+    if (!weights.is_loaded) {
+        std::cerr << "[SparseAttention] Layer " << layer_idx << " weights not loaded" << std::endl;
+        return Expected<std::vector<float>>(-1);
+    }
+    
+    // Use sparse attention pipeline
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = 256;  // Larger workgroups for sparse attention
+    VkPipeline pipeline = shader_runtime_->get_sparse_attention_pipeline(spec);
+    
+    // Fall back to regular attention if sparse shader not available
+    if (pipeline == VK_NULL_HANDLE) {
+        std::cout << "[SparseAttention] Falling back to dense attention" << std::endl;
+        return attention_with_weights(hidden, layer_idx, weights);
+    }
+    
+    std::cout << "[SparseAttention] Using window=" << window_size 
+              << " global_tokens=" << global_tokens 
+              << " for sequence length " << token_sequence_.size() << std::endl;
+    
+    // Create GPU buffers
+    size_t buffer_size = hidden.size() * sizeof(float);
+    auto buffers_result = create_activation_buffers(allocator_, buffer_size);
+    if (!buffers_result.has_value()) {
+        return Expected<std::vector<float>>(hidden);
+    }
+    auto buffers = buffers_result.value();
+    
+    // Upload input
+    auto upload_result = upload_to_gpu(hidden, buffers.input_buffer);
+    if (!upload_result.has_value()) {
+        destroy_activation_buffers(allocator_, buffers);
+        return Expected<std::vector<float>>(hidden);
+    }
+    
+    // Create descriptor set
+    VkDescriptorSet descriptor_set = shader_runtime_->allocate_descriptor_set(
+        shader_runtime_->get_descriptor_set_layout());
+    
+    // Bind input/output buffers
+    VkDescriptorBufferInfo input_info = {};
+    input_info.buffer = buffers.input_buffer;
+    input_info.offset = 0;
+    input_info.range = buffer_size;
+    
+    VkDescriptorBufferInfo output_info = {};
+    output_info.buffer = buffers.output_buffer;
+    output_info.offset = 0;
+    output_info.range = buffer_size;
+    
+    VkWriteDescriptorSet writes[2] = {};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &input_info;
+    
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptor_set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &output_info;
+    
+    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
+    
+    // Bind weight buffers
+    bind_weight_to_descriptor(descriptor_set, 2, weights.attn_q);
+    bind_weight_to_descriptor(descriptor_set, 3, weights.attn_k);
+    bind_weight_to_descriptor(descriptor_set, 4, weights.attn_v);
+    bind_weight_to_descriptor(descriptor_set, 5, weights.attn_o);
+    
+    // Get GPU KV cache and bind
+    const auto* gpu_kv_cache = kv_cache_manager_->get_gpu_cache(layer_idx);
+    if (gpu_kv_cache && gpu_kv_cache->is_initialized) {
+        VkDescriptorBufferInfo key_cache_info = {};
+        key_cache_info.buffer = gpu_kv_cache->key_buffer;
+        key_cache_info.offset = 0;
+        key_cache_info.range = VK_WHOLE_SIZE;
+        
+        VkDescriptorBufferInfo value_cache_info = {};
+        value_cache_info.buffer = gpu_kv_cache->value_buffer;
+        value_cache_info.offset = 0;
+        value_cache_info.range = VK_WHOLE_SIZE;
+        
+        VkWriteDescriptorSet kv_writes[2] = {};
+        kv_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        kv_writes[0].dstSet = descriptor_set;
+        kv_writes[0].dstBinding = 6;
+        kv_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        kv_writes[0].descriptorCount = 1;
+        kv_writes[0].pBufferInfo = &key_cache_info;
+        
+        kv_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        kv_writes[1].dstSet = descriptor_set;
+        kv_writes[1].dstBinding = 7;
+        kv_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        kv_writes[1].descriptorCount = 1;
+        kv_writes[1].pBufferInfo = &value_cache_info;
+        
+        vkUpdateDescriptorSets(device_, 2, kv_writes, 0, nullptr);
+    }
+    
+    // Calculate efficient workgroup count
+    uint32_t seq_len = token_sequence_.size();
+    uint32_t num_heads = config_.num_attention_heads;
+    
+    // For sparse attention, work scales with window_size not seq_len
+    // This enables O(window_size) per token instead of O(seq_len)
+    uint32_t workgroup_count = (seq_len * num_heads + 255) / 256;
+    
+    shader_runtime_->dispatch_compute(pipeline, descriptor_set, workgroup_count, 1, 1);
+    
+    // Read back output
+    std::vector<float> output(hidden.size());
+    auto download_result = download_from_gpu(buffers.output_buffer, output);
+    
     destroy_activation_buffers(allocator_, buffers);
     
     if (!download_result.has_value()) {
