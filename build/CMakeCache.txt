@@ -17,6 +17,9 @@
 //Build example applications
 BUILD_EXAMPLES:BOOL=ON
 
+//Build GUI application (requires ImGui + GLFW)
+BUILD_GUI:BOOL=ON
+
 //Build test suite
 BUILD_TESTS:BOOL=OFF
 
@@ -61,6 +64,32 @@ CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
 
 //Flags used by the CXX compiler during RELWITHDEBINFO builds.
 CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//C compiler
+CMAKE_C_COMPILER:FILEPATH=/usr/bin/cc
+
+//A wrapper around 'ar' adding the appropriate '--plugin' option
+// for the GCC compiler
+CMAKE_C_COMPILER_AR:FILEPATH=/usr/bin/gcc-ar-13
+
+//A wrapper around 'ranlib' adding the appropriate '--plugin' option
+// for the GCC compiler
+CMAKE_C_COMPILER_RANLIB:FILEPATH=/usr/bin/gcc-ranlib-13
+
+//Flags used by the C compiler during all build types.
+CMAKE_C_FLAGS:STRING=
+
+//Flags used by the C compiler during DEBUG builds.
+CMAKE_C_FLAGS_DEBUG:STRING=-g
+
+//Flags used by the C compiler during MINSIZEREL builds.
+CMAKE_C_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the C compiler during RELEASE builds.
+CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the C compiler during RELWITHDEBINFO builds.
+CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 
 //Path to a program.
 CMAKE_DLLTOOL:FILEPATH=CMAKE_DLLTOOL-NOTFOUND
@@ -243,6 +272,21 @@ LZ4_INCLUDE_DIR:PATH=/usr/include
 //Path to a library.
 LZ4_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/liblz4.so
 
+//Arguments to supply to pkg-config
+PKG_CONFIG_ARGN:STRING=
+
+//pkg-config executable
+PKG_CONFIG_EXECUTABLE:FILEPATH=/usr/bin/pkg-config
+
+//Value Computed by CMake
+SymbioteGUI_BINARY_DIR:STATIC=/media/michael/external/Vulkan-Symbiote-Loader/build/gui
+
+//Value Computed by CMake
+SymbioteGUI_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+SymbioteGUI_SOURCE_DIR:STATIC=/media/michael/external/Vulkan-Symbiote-Loader/gui
+
 //Vulkan Memory Allocator include directory
 VMA_INCLUDE_DIRS:PATH=/usr/include
 
@@ -294,6 +338,15 @@ ZLIB_LIBRARY_DEBUG:FILEPATH=ZLIB_LIBRARY_DEBUG-NOTFOUND
 //Path to a library.
 ZLIB_LIBRARY_RELEASE:FILEPATH=/usr/lib/x86_64-linux-gnu/libz.so
 
+//The directory containing a CMake configuration file for glfw3.
+glfw3_DIR:PATH=/usr/lib/x86_64-linux-gnu/cmake/glfw3
+
+//Path to a library.
+pkgcfg_lib_IMGUI_imgui:FILEPATH=/usr/lib/x86_64-linux-gnu/libimgui.a
+
+//Path to a library.
+pkgcfg_lib_IMGUI_stb:FILEPATH=/usr/lib/x86_64-linux-gnu/libstb.so
+
 
 ########################
 # INTERNAL cache entries
@@ -335,6 +388,22 @@ CMAKE_CXX_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
 CMAKE_CXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_CXX_FLAGS_RELWITHDEBINFO
 CMAKE_CXX_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_COMPILER
+CMAKE_C_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_COMPILER_AR
+CMAKE_C_COMPILER_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_COMPILER_RANLIB
+CMAKE_C_COMPILER_RANLIB-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS
+CMAKE_C_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_DEBUG
+CMAKE_C_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_MINSIZEREL
+CMAKE_C_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_RELEASE
+CMAKE_C_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_FLAGS_RELWITHDEBINFO
+CMAKE_C_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_DLLTOOL
 CMAKE_DLLTOOL-ADVANCED:INTERNAL=1
 //Executable file format
@@ -385,7 +454,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_NM
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=4
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=5
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP
@@ -430,8 +499,49 @@ CMAKE_TAPI-ADVANCED:INTERNAL=1
 CMAKE_UNAME:INTERNAL=/usr/bin/uname
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
+//Details about finding PkgConfig
+FIND_PACKAGE_MESSAGE_DETAILS_PkgConfig:INTERNAL=[/usr/bin/pkg-config][v1.8.1()]
 //Details about finding Vulkan
 FIND_PACKAGE_MESSAGE_DETAILS_Vulkan:INTERNAL=[/usr/lib/x86_64-linux-gnu/libvulkan.so][/usr/include][cfound components: glslc glslangValidator ][v1.4.313()]
+IMGUI_CFLAGS:INTERNAL=-I/usr/include/imgui;-I/usr/include/stb
+IMGUI_CFLAGS_I:INTERNAL=
+IMGUI_CFLAGS_OTHER:INTERNAL=
+IMGUI_FOUND:INTERNAL=1
+IMGUI_INCLUDEDIR:INTERNAL=/usr/include/imgui
+IMGUI_INCLUDE_DIRS:INTERNAL=/usr/include/imgui;/usr/include/stb
+IMGUI_LDFLAGS:INTERNAL=-L/usr/lib/x86_64-linux-gnu;-limgui;-lstb
+IMGUI_LDFLAGS_OTHER:INTERNAL=
+IMGUI_LIBDIR:INTERNAL=/usr/lib/x86_64-linux-gnu
+IMGUI_LIBRARIES:INTERNAL=imgui;stb
+IMGUI_LIBRARY_DIRS:INTERNAL=/usr/lib/x86_64-linux-gnu
+IMGUI_LIBS:INTERNAL=
+IMGUI_LIBS_L:INTERNAL=
+IMGUI_LIBS_OTHER:INTERNAL=
+IMGUI_LIBS_PATHS:INTERNAL=
+IMGUI_MODULE_NAME:INTERNAL=imgui
+IMGUI_PREFIX:INTERNAL=/usr
+IMGUI_STATIC_CFLAGS:INTERNAL=-I/usr/include/imgui;-I/usr/include/stb
+IMGUI_STATIC_CFLAGS_I:INTERNAL=
+IMGUI_STATIC_CFLAGS_OTHER:INTERNAL=
+IMGUI_STATIC_INCLUDE_DIRS:INTERNAL=/usr/include/imgui;/usr/include/stb
+IMGUI_STATIC_LDFLAGS:INTERNAL=-L/usr/lib/x86_64-linux-gnu;-limgui;-lm;-lstb
+IMGUI_STATIC_LDFLAGS_OTHER:INTERNAL=
+IMGUI_STATIC_LIBDIR:INTERNAL=
+IMGUI_STATIC_LIBRARIES:INTERNAL=imgui;m;stb
+IMGUI_STATIC_LIBRARY_DIRS:INTERNAL=/usr/lib/x86_64-linux-gnu
+IMGUI_STATIC_LIBS:INTERNAL=
+IMGUI_STATIC_LIBS_L:INTERNAL=
+IMGUI_STATIC_LIBS_OTHER:INTERNAL=
+IMGUI_STATIC_LIBS_PATHS:INTERNAL=
+IMGUI_VERSION:INTERNAL=1.90.1
+IMGUI_imgui_INCLUDEDIR:INTERNAL=
+IMGUI_imgui_LIBDIR:INTERNAL=
+IMGUI_imgui_PREFIX:INTERNAL=
+IMGUI_imgui_VERSION:INTERNAL=
+//ADVANCED property for variable: PKG_CONFIG_ARGN
+PKG_CONFIG_ARGN-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_EXECUTABLE
+PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Vulkan_GLSLANG_VALIDATOR_EXECUTABLE
 Vulkan_GLSLANG_VALIDATOR_EXECUTABLE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Vulkan_GLSLC_EXECUTABLE
@@ -448,4 +558,11 @@ ZLIB_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 ZLIB_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //linker supports push/pop state
 _CMAKE_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
+__pkg_config_arguments_IMGUI:INTERNAL=imgui
+__pkg_config_checked_IMGUI:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib_IMGUI_imgui
+pkgcfg_lib_IMGUI_imgui-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib_IMGUI_stb
+pkgcfg_lib_IMGUI_stb-ADVANCED:INTERNAL=1
+prefix_result:INTERNAL=/usr/lib/x86_64-linux-gnu
 

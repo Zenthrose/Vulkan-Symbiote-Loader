@@ -16,9 +16,42 @@ struct ImGuiContext;
 
 namespace vk_symbiote {
 class VulkanSymbioteEngine;
-class ChatSession;
 
 namespace gui {
+
+// Chat session for managing conversation
+class ChatSession {
+public:
+    struct ContextSegment {
+        std::string label;
+        uint32_t token_count;
+        uint64_t timestamp;
+    };
+
+    ChatSession();
+    ~ChatSession();
+
+    void addMessage(const ChatMessage& message);
+    std::vector<ChatMessage> getMessages() const;
+    void clear();
+
+    uint32_t getTokenCount() const;
+    uint32_t getMaxTokens() const;
+    void setMaxTokens(uint32_t max_tokens);
+
+    void addContextSegment(const std::string& label, uint32_t token_count);
+    std::vector<ContextSegment> getContextSegments() const;
+
+    void loadContextFromFiles(const std::vector<std::string>& files);
+    std::string buildPrompt(const std::string& user_input) const;
+
+private:
+    std::vector<ChatMessage> messages_;
+    mutable std::mutex messages_mutex_;
+    uint32_t current_tokens_ = 0;
+    uint32_t max_context_tokens_ = 200000;
+    std::vector<ContextSegment> context_segments_;
+};
 
 // GUI Configuration
 struct GUIConfig {

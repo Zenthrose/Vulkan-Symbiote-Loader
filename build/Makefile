@@ -226,6 +226,32 @@ benchmark_example/fast:
 	$(MAKE) $(MAKESILENT) -f examples/CMakeFiles/benchmark_example.dir/build.make examples/CMakeFiles/benchmark_example.dir/build
 .PHONY : benchmark_example/fast
 
+#=============================================================================
+# Target rules for targets named symbiote_gui
+
+# Build rule for target.
+symbiote_gui: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 symbiote_gui
+.PHONY : symbiote_gui
+
+# fast build rule for target.
+symbiote_gui/fast:
+	$(MAKE) $(MAKESILENT) -f gui/CMakeFiles/symbiote_gui.dir/build.make gui/CMakeFiles/symbiote_gui.dir/build
+.PHONY : symbiote_gui/fast
+
+#=============================================================================
+# Target rules for targets named symbiote_chat
+
+# Build rule for target.
+symbiote_chat: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 symbiote_chat
+.PHONY : symbiote_chat
+
+# fast build rule for target.
+symbiote_chat/fast:
+	$(MAKE) $(MAKESILENT) -f gui/CMakeFiles/symbiote_chat.dir/build.make gui/CMakeFiles/symbiote_chat.dir/build
+.PHONY : symbiote_chat/fast
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -240,6 +266,8 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... benchmark_example"
 	@echo "... compression_backends"
+	@echo "... symbiote_chat"
+	@echo "... symbiote_gui"
 	@echo "... vk_symbiote"
 	@echo "... vk_symbiote_benchmark"
 	@echo "... vk_symbiote_example"

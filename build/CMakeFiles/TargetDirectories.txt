@@ -27,3 +27,11 @@
 /media/michael/external/Vulkan-Symbiote-Loader/build/examples/CMakeFiles/install.dir
 /media/michael/external/Vulkan-Symbiote-Loader/build/examples/CMakeFiles/install/local.dir
 /media/michael/external/Vulkan-Symbiote-Loader/build/examples/CMakeFiles/install/strip.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/symbiote_gui.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/symbiote_chat.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/edit_cache.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/rebuild_cache.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/list_install_components.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/install.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/install/local.dir
+/media/michael/external/Vulkan-Symbiote-Loader/build/gui/CMakeFiles/install/strip.dir
