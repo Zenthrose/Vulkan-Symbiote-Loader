@@ -13,6 +13,7 @@ endif()
 # Options
 option(BUILD_EXAMPLES "Build example applications" ON)
 option(BUILD_TESTS "Build test suite" OFF)
+option(BUILD_GUI "Build GUI application (requires ImGui + GLFW)" ON)
 option(ENABLE_ZFP "Enable ZFP compression support" ON)
 option(ENABLE_BLOSC2 "Enable Blosc2 compression support" ON)
 
@@ -34,6 +35,18 @@ add_subdirectory(vk_symbiote)
 
 if(BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(BUILD_GUI)
+    # Check for GUI dependencies
+    find_package(glfw3 QUIET)
+    if(glfw3_FOUND)
+        message(STATUS "✅ GUI dependencies found (GLFW)")
+        add_subdirectory(gui)
+    else()
+        message(WARNING "⚠️  GLFW not found. GUI application will not be built.")
+        message(STATUS "   Install GLFW: sudo apt-get install libglfw3-dev")
+    endif()
 endif()
 
 # Summary
