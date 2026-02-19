@@ -158,6 +158,12 @@ private:
     
     // ImGui
     ImGuiContext* imgui_context_ = nullptr;
+    VkDescriptorPool imgui_descriptor_pool_ = VK_NULL_HANDLE;
+    VkRenderPass render_pass_ = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> framebuffers_;
+    std::vector<VkImageView> swapchain_image_views_;
+    std::vector<VkCommandBuffer> command_buffers_;
+    VkCommandPool command_pool_ = VK_NULL_HANDLE;
     
     // Engine
     std::unique_ptr<VulkanSymbioteEngine> engine_;

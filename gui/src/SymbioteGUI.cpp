@@ -144,6 +144,32 @@ void SymbioteGUI::shutdown() {
     }
     
     // Cleanup Vulkan
+    if (imgui_descriptor_pool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, imgui_descriptor_pool_, nullptr);
+    }
+    
+    for (auto framebuffer : framebuffers_) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device_, framebuffer, nullptr);
+        }
+    }
+    framebuffers_.clear();
+    
+    for (auto image_view : swapchain_image_views_) {
+        if (image_view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device_, image_view, nullptr);
+        }
+    }
+    swapchain_image_views_.clear();
+    
+    if (render_pass_ != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device_, render_pass_, nullptr);
+    }
+    
+    if (command_pool_ != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(device_, command_pool_, nullptr);
+    }
+    
     if (swapchain_ != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(device_, swapchain_, nullptr);
     }
@@ -223,8 +249,231 @@ bool SymbioteGUI::createVulkanInstance() {
         return false;
     }
     
-    // For now, we won't create a full device - we'll use the engine's device
-    // This is a simplified implementation
+    // Create device and swapchain for rendering
+    if (!createVulkanDevice()) {
+        return false;
+    }
+    
+    if (!createSwapchain()) {
+        return false;
+    }
+    
+    return true;
+}
+
+bool SymbioteGUI::createVulkanDevice() {
+    // Select physical device
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
+    if (device_count == 0) {
+        std::cerr << "Failed to find GPUs with Vulkan support" << std::endl;
+        return false;
+    }
+    
+    std::vector<VkPhysicalDevice> devices(device_count);
+    vkEnumeratePhysicalDevices(instance_, &device_count, devices.data());
+    
+    // Select first suitable device
+    physical_device_ = devices[0];
+    
+    // Find graphics queue family
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, queue_families.data());
+    
+    uint32_t graphics_family = UINT32_MAX;
+    for (uint32_t i = 0; i < queue_family_count; i++) {
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            VkBool32 present_support = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(physical_device_, i, surface_, &present_support);
+            if (present_support) {
+                graphics_family = i;
+                break;
+            }
+        }
+    }
+    
+    if (graphics_family == UINT32_MAX) {
+        std::cerr << "Failed to find suitable queue family" << std::endl;
+        return false;
+    }
+    
+    // Create logical device
+    float queue_priority = 1.0f;
+    VkDeviceQueueCreateInfo queue_create_info = {};
+    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_info.queueFamilyIndex = graphics_family;
+    queue_create_info.queueCount = 1;
+    queue_create_info.pQueuePriorities = &queue_priority;
+    
+    const char* device_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    
+    VkDeviceCreateInfo device_create_info = {};
+    device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_create_info.queueCreateInfoCount = 1;
+    device_create_info.pQueueCreateInfos = &queue_create_info;
+    device_create_info.enabledExtensionCount = 1;
+    device_create_info.ppEnabledExtensionNames = device_extensions;
+    
+    if (vkCreateDevice(physical_device_, &device_create_info, nullptr, &device_) != VK_SUCCESS) {
+        std::cerr << "Failed to create logical device" << std::endl;
+        return false;
+    }
+    
+    vkGetDeviceQueue(device_, graphics_family, 0, &graphics_queue_);
+    
+    // Create command pool
+    VkCommandPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.queueFamilyIndex = graphics_family;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    
+    if (vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_) != VK_SUCCESS) {
+        std::cerr << "Failed to create command pool" << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+bool SymbioteGUI::createSwapchain() {
+    // Get surface capabilities
+    VkSurfaceCapabilitiesKHR caps;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device_, surface_, &caps);
+    
+    // Choose surface format
+    uint32_t format_count;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_, surface_, &format_count, nullptr);
+    std::vector<VkSurfaceFormatKHR> formats(format_count);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_, surface_, &format_count, formats.data());
+    
+    VkSurfaceFormatKHR surface_format = formats[0];
+    for (const auto& format : formats) {
+        if (format.format == VK_FORMAT_B8G8R8A8_UNORM && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            surface_format = format;
+            break;
+        }
+    }
+    
+    // Choose present mode
+    uint32_t present_mode_count;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_, surface_, &present_mode_count, nullptr);
+    std::vector<VkPresentModeKHR> present_modes(present_mode_count);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_, surface_, &present_mode_count, present_modes.data());
+    
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+    for (const auto& mode : present_modes) {
+        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            present_mode = mode;
+            break;
+        }
+    }
+    
+    // Create swapchain
+    VkSwapchainCreateInfoKHR swapchain_info = {};
+    swapchain_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_info.surface = surface_;
+    swapchain_info.minImageCount = 2;
+    swapchain_info.imageFormat = surface_format.format;
+    swapchain_info.imageColorSpace = surface_format.colorSpace;
+    swapchain_info.imageExtent = caps.currentExtent;
+    swapchain_info.imageArrayLayers = 1;
+    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_info.preTransform = caps.currentTransform;
+    swapchain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_info.presentMode = present_mode;
+    swapchain_info.clipped = VK_TRUE;
+    
+    if (vkCreateSwapchainKHR(device_, &swapchain_info, nullptr, &swapchain_) != VK_SUCCESS) {
+        std::cerr << "Failed to create swapchain" << std::endl;
+        return false;
+    }
+    
+    // Get swapchain images
+    uint32_t image_count;
+    vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, nullptr);
+    std::vector<VkImage> swapchain_images(image_count);
+    vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, swapchain_images.data());
+    
+    // Create render pass
+    VkAttachmentDescription color_attachment = {};
+    color_attachment.format = surface_format.format;
+    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    
+    VkAttachmentReference color_attachment_ref = {};
+    color_attachment_ref.attachment = 0;
+    color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_attachment_ref;
+    
+    VkRenderPassCreateInfo render_pass_info = {};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_info.attachmentCount = 1;
+    render_pass_info.pAttachments = &color_attachment;
+    render_pass_info.subpassCount = 1;
+    render_pass_info.pSubpasses = &subpass;
+    
+    if (vkCreateRenderPass(device_, &render_pass_info, nullptr, &render_pass_) != VK_SUCCESS) {
+        std::cerr << "Failed to create render pass" << std::endl;
+        return false;
+    }
+    
+    // Create image views and framebuffers
+    swapchain_image_views_.resize(image_count);
+    framebuffers_.resize(image_count);
+    for (size_t i = 0; i < image_count; i++) {
+        VkImageViewCreateInfo view_info = {};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image = swapchain_images[i];
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = surface_format.format;
+        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.layerCount = 1;
+        
+        if (vkCreateImageView(device_, &view_info, nullptr, &swapchain_image_views_[i]) != VK_SUCCESS) {
+            std::cerr << "Failed to create image view" << std::endl;
+            return false;
+        }
+        
+        VkFramebufferCreateInfo fb_info = {};
+        fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb_info.renderPass = render_pass_;
+        fb_info.attachmentCount = 1;
+        fb_info.pAttachments = &swapchain_image_views_[i];
+        fb_info.width = caps.currentExtent.width;
+        fb_info.height = caps.currentExtent.height;
+        fb_info.layers = 1;
+        
+        if (vkCreateFramebuffer(device_, &fb_info, nullptr, &framebuffers_[i]) != VK_SUCCESS) {
+            std::cerr << "Failed to create framebuffer" << std::endl;
+            return false;
+        }
+    }
+    
+    // Allocate command buffers
+    command_buffers_.resize(image_count);
+    VkCommandBufferAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool = command_pool_;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandBufferCount = static_cast<uint32_t>(command_buffers_.size());
+    
+    if (vkAllocateCommandBuffers(device_, &alloc_info, command_buffers_.data()) != VK_SUCCESS) {
+        std::cerr << "Failed to allocate command buffers" << std::endl;
+        return false;
+    }
     
     return true;
 }
@@ -243,15 +492,103 @@ bool SymbioteGUI::createImGui() {
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForVulkan(window_, true);
     
-    // Note: Full Vulkan backend initialization would require more setup
-    // For this implementation, we're creating the structure
+    // Create descriptor pool for ImGui
+    VkDescriptorPoolSize pool_sizes[] = {
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+    };
+    
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pool_info.maxSets = 1000 * 11;
+    pool_info.poolSizeCount = 11;
+    pool_info.pPoolSizes = pool_sizes;
+    
+    if (vkCreateDescriptorPool(device_, &pool_info, nullptr, &imgui_descriptor_pool_) != VK_SUCCESS) {
+        std::cerr << "Failed to create ImGui descriptor pool" << std::endl;
+        return false;
+    }
+    
+    // Initialize ImGui Vulkan backend
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = instance_;
+    init_info.PhysicalDevice = physical_device_;
+    init_info.Device = device_;
+    init_info.QueueFamily = 0; // We know we use family 0 from createVulkanDevice
+    init_info.Queue = graphics_queue_;
+    init_info.PipelineCache = VK_NULL_HANDLE;
+    init_info.DescriptorPool = imgui_descriptor_pool_;
+    init_info.Subpass = 0;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = static_cast<uint32_t>(framebuffers_.size());
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator = nullptr;
+    
+    if (!ImGui_ImplVulkan_Init(&init_info, render_pass_)) {
+        std::cerr << "Failed to initialize ImGui Vulkan backend" << std::endl;
+        return false;
+    }
+    
+    // Upload fonts
+    if (!ImGui_ImplVulkan_CreateFontsTexture()) {
+        std::cerr << "Failed to create ImGui fonts texture" << std::endl;
+        return false;
+    }
     
     return true;
 }
 
 void SymbioteGUI::run() {
+    // Get swapchain images for rendering
+    uint32_t image_count = 0;
+    vkGetSwapchainImagesKHR(device_, swapchain_, &image_count, nullptr);
+    
+    // Create semaphores for synchronization
+    VkSemaphoreCreateInfo semaphore_info = {};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    
+    VkSemaphore image_available_semaphore;
+    VkSemaphore render_finished_semaphore;
+    vkCreateSemaphore(device_, &semaphore_info, nullptr, &image_available_semaphore);
+    vkCreateSemaphore(device_, &semaphore_info, nullptr, &render_finished_semaphore);
+    
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VkFence in_flight_fence;
+    vkCreateFence(device_, &fence_info, nullptr, &in_flight_fence);
+    
+    ImVec4 clear_color = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
+    
     while (running_ && !glfwWindowShouldClose(window_)) {
         glfwPollEvents();
+        
+        // Wait for previous frame
+        vkWaitForFences(device_, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(device_, 1, &in_flight_fence);
+        
+        // Acquire next image
+        uint32_t image_index;
+        VkResult acquire_result = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, 
+            image_available_semaphore, VK_NULL_HANDLE, &image_index);
+        
+        if (acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
+            // Swapchain is out of date (window resized)
+            continue;
+        } else if (acquire_result != VK_SUCCESS && acquire_result != VK_SUBOPTIMAL_KHR) {
+            std::cerr << "Failed to acquire swapchain image" << std::endl;
+            break;
+        }
         
         // Start ImGui frame
         ImGui_ImplVulkan_NewFrame();
@@ -264,11 +601,81 @@ void SymbioteGUI::run() {
         // Handle async generation
         handleAsyncGeneration();
         
-        // Rendering would go here in full implementation
-        // For now, just clear and swap
+        // Rendering
+        ImGui::Render();
         
-        glfwSwapBuffers(window_);
+        // Record command buffer
+        VkCommandBufferBeginInfo begin_info = {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        
+        vkBeginCommandBuffer(command_buffers_[image_index], &begin_info);
+        
+        VkRenderPassBeginInfo render_pass_info = {};
+        render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_info.renderPass = render_pass_;
+        render_pass_info.framebuffer = framebuffers_[image_index];
+        render_pass_info.renderArea.extent = {1600, 900}; // TODO: get actual extent
+        
+        VkClearValue clear_value = {};
+        clear_value.color = {{clear_color.x, clear_color.y, clear_color.z, clear_color.w}};
+        render_pass_info.clearValueCount = 1;
+        render_pass_info.pClearValues = &clear_value;
+        
+        vkCmdBeginRenderPass(command_buffers_[image_index], &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+        
+        // Draw ImGui
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), command_buffers_[image_index]);
+        
+        vkCmdEndRenderPass(command_buffers_[image_index]);
+        
+        if (vkEndCommandBuffer(command_buffers_[image_index]) != VK_SUCCESS) {
+            std::cerr << "Failed to record command buffer" << std::endl;
+            break;
+        }
+        
+        // Submit command buffer
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        
+        VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores = &image_available_semaphore;
+        submit_info.pWaitDstStageMask = wait_stages;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &command_buffers_[image_index];
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = &render_finished_semaphore;
+        
+        if (vkQueueSubmit(graphics_queue_, 1, &submit_info, in_flight_fence) != VK_SUCCESS) {
+            std::cerr << "Failed to submit draw command buffer" << std::endl;
+            break;
+        }
+        
+        // Present
+        VkPresentInfoKHR present_info = {};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = &render_finished_semaphore;
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains = &swapchain_;
+        present_info.pImageIndices = &image_index;
+        
+        VkResult present_result = vkQueuePresentKHR(graphics_queue_, &present_info);
+        
+        if (present_result == VK_ERROR_OUT_OF_DATE_KHR || present_result == VK_SUBOPTIMAL_KHR) {
+            // Swapchain is out of date
+        } else if (present_result != VK_SUCCESS) {
+            std::cerr << "Failed to present swapchain image" << std::endl;
+            break;
+        }
     }
+    
+    // Cleanup synchronization objects
+    vkDeviceWaitIdle(device_);
+    vkDestroyFence(device_, in_flight_fence, nullptr);
+    vkDestroySemaphore(device_, render_finished_semaphore, nullptr);
+    vkDestroySemaphore(device_, image_available_semaphore, nullptr);
 }
 
 void SymbioteGUI::processUI() {
