@@ -119,6 +119,16 @@ bool SymbioteGUI::initialize(int width, int height, const char* title) {
         return false;
     }
     
+    // Create chat session (engine created when model is loaded)
+    chat_session_ = std::make_unique<ChatSession>();
+    
+    ChatMessage msg;
+    msg.type = ChatMessage::SYSTEM;
+    msg.content = "Welcome to Vulkan Symbiote! Open a model to start chatting.";
+    msg.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    chat_history_.push_back(msg);
+    
     // Load settings
     loadSettings();
     
@@ -1091,34 +1101,71 @@ bool SymbioteGUI::loadModel(const std::string& path) {
     
     // Async loading
     std::thread load_thread([this, path]() {
+        bool success = false;
+        std::string error_msg;
+        
         try {
-            loading_status_ = "Loading model weights...";
-            loading_progress_ = 0.3f;
+            loading_status_ = "Creating engine...";
+            loading_progress_ = 0.1f;
             
-            // engine_->loadModel(path);
+            // Unload current model if any
+            if (engine_) {
+                loading_status_ = "Unloading previous model...";
+                engine_.reset();
+            }
             
-            loading_status_ = "Initializing KV cache...";
-            loading_progress_ = 0.7f;
+            loading_status_ = "Creating VulkanSymbioteEngine...";
+            loading_progress_ = 0.2f;
             
-            loading_status_ = "Ready!";
-            loading_progress_ = 1.0f;
+            // Create new engine with the model path
+            // The engine constructor takes the model path and loads it
+            try {
+                engine_ = std::make_unique<VulkanSymbioteEngine>(path);
+                loading_progress_ = 0.5f;
+                loading_status_ = "Engine created, initializing Vulkan...";
+                
+                // The engine should be ready after construction
+                loading_status_ = "Loading model weights...";
+                loading_progress_ = 0.7f;
+                
+                loading_status_ = "Model loaded successfully!";
+                loading_progress_ = 1.0f;
+                success = true;
+                
+                config_.last_model_path = path;
+                
+                // Add system message
+                ChatMessage msg;
+                msg.type = ChatMessage::SYSTEM;
+                msg.content = "Model loaded successfully: " + path;
+                msg.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                
+                std::lock_guard<std::mutex> lock(chat_mutex_);
+                chat_history_.push_back(msg);
+                
+            } catch (const std::exception& e) {
+                error_msg = e.what();
+                std::cerr << "Failed to create engine: " << error_msg << std::endl;
+                success = false;
+            }
             
-            config_.last_model_path = path;
-            
-            // Add system message
+        } catch (const std::exception& e) {
+            error_msg = e.what();
             ChatMessage msg;
-            msg.type = ChatMessage::SYSTEM;
-            msg.content = "Model loaded successfully: " + path;
+            msg.type = ChatMessage::ERROR;
+            msg.content = std::string("Failed to load model: ") + error_msg;
             msg.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
             
             std::lock_guard<std::mutex> lock(chat_mutex_);
             chat_history_.push_back(msg);
-            
-        } catch (const std::exception& e) {
+        }
+        
+        if (!success && !error_msg.empty()) {
             ChatMessage msg;
             msg.type = ChatMessage::ERROR;
-            msg.content = std::string("Failed to load model: ") + e.what();
+            msg.content = "Failed to load model: " + error_msg;
             msg.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
             
@@ -1167,9 +1214,29 @@ void SymbioteGUI::handleAsyncGeneration() {
         generation_thread_ = std::thread([this, prompt]() {
             auto start_time = std::chrono::high_resolution_clock::now();
             
-            // Generate response
-            std::string response = "This is a placeholder response. In the full implementation, "
-                                   "this would call the VulkanSymbioteEngine to generate text.";
+            std::string response;
+            bool generation_success = false;
+            
+            // Try to use the engine for actual generation
+            if (engine_) {
+                try {
+                    // Build full prompt from chat history
+                    std::string full_prompt = chat_session_->buildPrompt(prompt);
+                    
+                    // Call the engine to generate
+                    response = engine_->generate(full_prompt, 256, 0.7f);
+                    generation_success = !response.empty();
+                    
+                    if (!generation_success) {
+                        response = "Error: Generation returned empty response. Please ensure a model is loaded.";
+                    }
+                } catch (const std::exception& e) {
+                    response = "Error during generation: " + std::string(e.what());
+                }
+            } else {
+                // Fallback: engine not ready
+                response = "⚠️ No model loaded. Please load a model first using File → Open Model.";
+            }
             
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -1180,7 +1247,7 @@ void SymbioteGUI::handleAsyncGeneration() {
             msg.content = response;
             msg.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
-            msg.token_count = 50;  // Placeholder
+            msg.token_count = generation_success ? static_cast<uint32_t>(response.size() / 4) : 0;  // Rough estimate
             msg.generation_time_ms = duration.count();
             
             {
