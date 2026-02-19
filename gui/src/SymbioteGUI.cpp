@@ -756,6 +756,14 @@ void SymbioteGUI::drawMainWindow() {
             ImGui::EndMenu();
         }
         
+        // Status indicator on the right side of menu bar
+        ImGui::SameLine(ImGui::GetWindowWidth() - 250);
+        if (engine_) {
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "● MODEL LOADED");
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "● NO MODEL");
+        }
+        
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Show Token Counter", nullptr, &config_.show_token_counter);
             ImGui::MenuItem("Show Pack Visualizer", nullptr, &config_.show_pack_visualizer);
@@ -801,14 +809,23 @@ void SymbioteGUI::drawMainWindow() {
 void SymbioteGUI::drawChatPanel() {
     ImGui::Begin("Chat", nullptr, ImGuiWindowFlags_NoCollapse);
     
-    // Header with status
+    // Header with status - make it very prominent
+    ImGui::PushStyleColor(ImGuiCol_Text, engine_ ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 128, 0, 255));
     if (engine_) {
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "● Model Loaded");
-        ImGui::SameLine();
-        ImGui::Text("| Context: %zu / 200,000 tokens", chat_history_.size() * 100); // Placeholder
+        ImGui::Text("● MODEL LOADED - Ready to chat!");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Model is loaded and ready for inference");
+        }
     } else {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "● No Model");
+        ImGui::Text("● NO MODEL - Please load a model first (File > Open Model)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Click File menu and select 'Open Model' to load a GGUF file");
+        }
     }
+    ImGui::PopStyleColor();
+    
+    ImGui::SameLine();
+    ImGui::Text("| Messages: %zu", chat_history_.size());
     
     ImGui::Separator();
     
@@ -864,25 +881,24 @@ void SymbioteGUI::drawChatPanel() {
     }
     
     // Input area
-    char input_buffer[4096] = {};
-    strncpy(input_buffer, input_buffer_.c_str(), sizeof(input_buffer) - 1);
+    static char input_buffer[4096] = {};
     
     ImGui::PushItemWidth(-ImGui::GetFrameHeightWithSpacing() * 4);
-    if (ImGui::InputText("##Input", input_buffer, sizeof(input_buffer), 
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
-        if (strlen(input_buffer) > 0) {
-            sendMessage(input_buffer);
-            input_buffer_.clear();
-        }
-    }
+    bool enter_pressed = ImGui::InputText("##Input", input_buffer, sizeof(input_buffer), 
+                         ImGuiInputTextFlags_EnterReturnsTrue);
+    
+    // Check if widget is active to maintain focus
+    bool input_active = ImGui::IsItemActive();
     ImGui::PopItemWidth();
     
     ImGui::SameLine();
-    if (ImGui::Button("Send", ImVec2(80, 0))) {
-        if (strlen(input_buffer) > 0) {
-            sendMessage(input_buffer);
-            input_buffer_.clear();
-        }
+    bool send_clicked = ImGui::Button("Send", ImVec2(80, 0));
+    
+    if ((enter_pressed || send_clicked) && strlen(input_buffer) > 0) {
+        sendMessage(input_buffer);
+        input_buffer[0] = '\0';  // Clear the buffer
+        // Keep focus on input after sending
+        ImGui::SetKeyboardFocusHere(-1);
     }
     
     ImGui::SameLine();
