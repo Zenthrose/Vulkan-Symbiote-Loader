@@ -24,6 +24,28 @@ template<typename T>
 T max_val(T a, T b) { return a > b ? a : b; }
 
 // ============================================================================
+// Shader Loading Helper - Forward declaration for use in pipeline getters
+// ============================================================================
+static const char* SHADER_DIR = "vk_symbiote/shaders/";
+
+static Expected<std::string> load_shader_source(const std::string& filename) {
+    std::string full_path = std::string(SHADER_DIR) + filename;
+    
+    std::ifstream file(full_path);
+    if (file.is_open()) {
+        std::string source((std::istreambuf_iterator<char>(file)),
+                          std::istreambuf_iterator<char>());
+        file.close();
+        std::cout << "[ShaderRuntime] Loaded shader: " << filename 
+                  << " (" << source.size() << " bytes)" << std::endl;
+        return Expected<std::string>(std::move(source));
+    }
+    
+    std::cerr << "[ShaderRuntime] Failed to load shader: " << full_path << std::endl;
+    return Expected<std::string>(-1);
+}
+
+// ============================================================================
 // Enhanced Cooperative Matrix Manager with F32 Support
 // ============================================================================
 struct CooperativeMatrixProperties {
@@ -1128,9 +1150,16 @@ VkPipeline ShaderRuntime::get_attention_pipeline(const ShaderSpecialization& spe
         return it->second;
     }
     
-    std::string shader_source = generate_tuned_attention_shader(512, 64);
-    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    // PRIORITY 1 FIX: Load from shader file instead of broken inline generation
+    auto source_result = load_shader_source("attention.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load attention shader from file" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
     if (!shader_module.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to compile attention shader" << std::endl;
         return VK_NULL_HANDLE;
     }
     
@@ -1139,6 +1168,7 @@ VkPipeline ShaderRuntime::get_attention_pipeline(const ShaderSpecialization& spe
     
     if (pipeline != VK_NULL_HANDLE) {
         named_pipeline_cache_[cache_key] = pipeline;
+        std::cout << "[ShaderRuntime] Created attention pipeline from file" << std::endl;
     }
     return pipeline;
 }
@@ -1150,8 +1180,14 @@ VkPipeline ShaderRuntime::get_feedforward_pipeline(const ShaderSpecialization& s
         return it->second;
     }
     
-    std::string shader_source = generate_tuned_matmul_shader(4096, 4096, 4096);
-    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    // Load from shader file
+    auto source_result = load_shader_source("feed_forward.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load feed_forward shader from file" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
     if (!shader_module.has_value()) {
         return VK_NULL_HANDLE;
     }
@@ -1172,51 +1208,14 @@ VkPipeline ShaderRuntime::get_rms_norm_pipeline(const ShaderSpecialization& spec
         return it->second;
     }
     
-    // Simple RMS norm shader
-    std::string shader_source = R"(
-        #version 460
-        layout(local_size_x = )" + std::to_string(spec.workgroup_size_x) + R"(, local_size_y = 1) in;
-        
-        layout(set = 0, binding = 0) readonly buffer Input { float data[]; } input_buffer;
-        layout(set = 0, binding = 1) buffer Output { float data[]; } output_buffer;
-        
-        layout(push_constant) uniform Params {
-            uint size;
-            float epsilon;
-        } params;
-        
-        shared float shared_mem[256];
-        
-        void main() {
-            uint global_id = gl_GlobalInvocationID.x;
-            uint local_id = gl_LocalInvocationID.x;
-            
-            float sum_sq = 0.0;
-            for (uint i = global_id; i < params.size; i += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
-                float val = input_buffer.data[i];
-                sum_sq += val * val;
-            }
-            
-            shared_mem[local_id] = sum_sq;
-            barrier();
-            
-            // Reduction
-            for (uint stride = gl_WorkGroupSize.x / 2; stride > 0; stride /= 2) {
-                if (local_id < stride) {
-                    shared_mem[local_id] += shared_mem[local_id + stride];
-                }
-                barrier();
-            }
-            
-            float rms = sqrt(shared_mem[0] / float(params.size) + params.epsilon);
-            
-            for (uint i = global_id; i < params.size; i += gl_NumWorkGroups.x * gl_WorkGroupSize.x) {
-                output_buffer.data[i] = input_buffer.data[i] / rms;
-            }
-        }
-    )";
+    // Load from shader file
+    auto source_result = load_shader_source("rms_norm.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load rms_norm shader from file" << std::endl;
+        return VK_NULL_HANDLE;
+    }
     
-    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
     if (!shader_module.has_value()) {
         return VK_NULL_HANDLE;
     }
@@ -1237,8 +1236,14 @@ VkPipeline ShaderRuntime::get_final_linear_pipeline(const ShaderSpecialization& 
         return it->second;
     }
     
-    std::string shader_source = generate_tuned_matmul_shader(1, 4096, 4096);
-    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    // Load from shader file
+    auto source_result = load_shader_source("final_linear.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load final_linear shader from file" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
     if (!shader_module.has_value()) {
         return VK_NULL_HANDLE;
     }
@@ -1259,40 +1264,14 @@ VkPipeline ShaderRuntime::get_embedding_lookup_pipeline(const ShaderSpecializati
         return it->second;
     }
     
-    // Load embedding lookup shader from file or generate inline
-    std::string shader_source = R"(
-        #version 460
-        layout(local_size_x = )" + std::to_string(spec.workgroup_size_x) + R"(, local_size_y = 1) in;
-        
-        layout(set = 0, binding = 0) readonly buffer TokenBuf { uint token_ids[]; };
-        layout(set = 0, binding = 1) writeonly buffer OutputBuf { float output_data[]; };
-        layout(set = 0, binding = 2) readonly buffer EmbeddingWeight { float embedding_table[]; };
-        
-        layout(push_constant) uniform PC {
-            uint seq_len;
-            uint hidden_size;
-            uint vocab_size;
-        } pc;
-        
-        void main() {
-            uint gid = gl_GlobalInvocationID.x;
-            uint token_idx = gid / pc.hidden_size;
-            uint hidden_dim = gid % pc.hidden_size;
-            
-            if (token_idx >= pc.seq_len || hidden_dim >= pc.hidden_size) return;
-            
-            uint token_id = token_ids[token_idx];
-            token_id = min(token_id, pc.vocab_size - 1);
-            
-            uint embed_idx = token_id * pc.hidden_size + hidden_dim;
-            float embed_val = embedding_table[embed_idx];
-            
-            uint out_idx = token_idx * pc.hidden_size + hidden_dim;
-            output_data[out_idx] = embed_val;
-        }
-    )";
+    // Load from shader file
+    auto source_result = load_shader_source("embedding_lookup.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load embedding_lookup shader from file" << std::endl;
+        return VK_NULL_HANDLE;
+    }
     
-    auto shader_module = compile_glsl_to_spirv(shader_source, {});
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
     if (!shader_module.has_value()) {
         return VK_NULL_HANDLE;
     }
@@ -1409,8 +1388,22 @@ VkPipeline ShaderRuntime::get_sparse_attention_pipeline(const ShaderSpecializati
     return pipeline;
 }
 
-void ShaderRuntime::dispatch_compute(VkPipeline pipeline, VkDescriptorSet descriptor_set,
-                                     uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z) {
+// ============================================================================
+// FIXED dispatch_compute - Priority 1: Proper GPU compute with error checking
+// ============================================================================
+
+// VkResult error checking helper
+#define VK_CHECK(result, msg) \
+    if ((result) != VK_SUCCESS) { \
+        std::cerr << "[ShaderRuntime] " << msg << " failed: " << (result) << std::endl; \
+        return static_cast<int>(result); \
+    }
+
+// Fixed dispatch with proper error checking and fence synchronization
+ExpectedVoid ShaderRuntime::dispatch_compute(VkPipeline pipeline, VkDescriptorSet descriptor_set,
+                                     uint32_t group_count_x, uint32_t group_count_y, 
+                                     uint32_t group_count_z, VkFence fence) {
+    
     VkCommandBufferAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1418,30 +1411,70 @@ void ShaderRuntime::dispatch_compute(VkPipeline pipeline, VkDescriptorSet descri
     alloc_info.commandBufferCount = 1;
     
     VkCommandBuffer cmd_buffer;
-    vkAllocateCommandBuffers(device_, &alloc_info, &cmd_buffer);
+    VkResult result = vkAllocateCommandBuffers(device_, &alloc_info, &cmd_buffer);
+    VK_CHECK(result, "vkAllocateCommandBuffers");
     
     VkCommandBufferBeginInfo begin_info = {};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     
-    vkBeginCommandBuffer(cmd_buffer, &begin_info);
+    result = vkBeginCommandBuffer(cmd_buffer, &begin_info);
+    if (result != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+        VK_CHECK(result, "vkBeginCommandBuffer");
+    }
     
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_,
                            0, 1, &descriptor_set, 0, nullptr);
     vkCmdDispatch(cmd_buffer, group_count_x, group_count_y, group_count_z);
     
-    vkEndCommandBuffer(cmd_buffer);
+    result = vkEndCommandBuffer(cmd_buffer);
+    if (result != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+        VK_CHECK(result, "vkEndCommandBuffer");
+    }
     
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd_buffer;
     
-    vkQueueSubmit(compute_queue_, 1, &submit_info, VK_NULL_HANDLE);
-    vkQueueWaitIdle(compute_queue_);
+    result = vkQueueSubmit(compute_queue_, 1, &submit_info, fence);
+    if (result != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+        VK_CHECK(result, "vkQueueSubmit");
+    }
     
-    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+    // If no fence provided, wait immediately
+    if (fence == VK_NULL_HANDLE) {
+        result = vkQueueWaitIdle(compute_queue_);
+        vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+        VK_CHECK(result, "vkQueueWaitIdle");
+    } else {
+        // Store cmd buffer to free later after fence signals
+        vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buffer);
+    }
+    
+    return make_expected_success();
+}
+
+// Wait for compute completion using fence
+ExpectedVoid ShaderRuntime::wait_for_compute(VkFence fence, uint64_t timeout_ns) {
+    if (fence == VK_NULL_HANDLE) {
+        return make_expected_success();  // Nothing to wait for
+    }
+    
+    VkResult result = vkWaitForFences(device_, 1, &fence, VK_TRUE, timeout_ns);
+    if (result == VK_TIMEOUT) {
+        return ExpectedVoid(-1);  // Timeout
+    }
+    VK_CHECK(result, "vkWaitForFences");
+    
+    result = vkResetFences(device_, 1, &fence);
+    VK_CHECK(result, "vkResetFences");
+    
+    return make_expected_success();
 }
 
 VkDescriptorSet ShaderRuntime::allocate_descriptor_set(VkDescriptorSetLayout layout) {

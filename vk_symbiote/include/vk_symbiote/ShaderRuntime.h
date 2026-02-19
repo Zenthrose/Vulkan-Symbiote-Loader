@@ -137,12 +137,16 @@ public:
     VkDescriptorSetLayout get_descriptor_set_layout() const { return descriptor_set_layout_; }
     VkPipelineLayout get_pipeline_layout() const { return pipeline_layout_; }
     
-    // Compute dispatch
-    void dispatch_compute(VkPipeline pipeline,
-                          VkDescriptorSet descriptor_set,
-                          uint32_t group_count_x,
-                          uint32_t group_count_y = 1,
-                          uint32_t group_count_z = 1);
+    // Compute dispatch with error checking and fence support
+    ExpectedVoid dispatch_compute(VkPipeline pipeline,
+                                  VkDescriptorSet descriptor_set,
+                                  uint32_t group_count_x,
+                                  uint32_t group_count_y = 1,
+                                  uint32_t group_count_z = 1,
+                                  VkFence fence = VK_NULL_HANDLE);
+    
+    // Wait for compute completion
+    ExpectedVoid wait_for_compute(VkFence fence, uint64_t timeout_ns = UINT64_MAX);
     
     // Auto-tuning: Optimize shader parameters for this device
     void auto_tune_shaders();
