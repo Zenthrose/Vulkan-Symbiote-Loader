@@ -4,6 +4,7 @@
  */
 
 #include "../include/vk_symbiote_gui/SymbioteGUI.h"
+#include "../../vk_symbiote/include/vk_symbiote/VulkanSymbioteEngine.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -227,7 +228,7 @@ bool SymbioteGUI::createImGui() {
     imgui_context_ = ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    // io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Requires docking branch
     
     // Setup style
     ImGui::StyleColorsDark();
@@ -266,11 +267,11 @@ void SymbioteGUI::run() {
 void SymbioteGUI::processUI() {
     // Main dockspace
     ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::SetNextWindowViewport(viewport->ID);
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    // ImGui::SetNextWindowViewport(viewport->ID); // Requires viewport API
     
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar;
     window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
     window_flags |= ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
     window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
@@ -281,10 +282,10 @@ void SymbioteGUI::processUI() {
     ImGui::Begin("MainDockspace", nullptr, window_flags);
     ImGui::PopStyleVar(2);
     
-    // Dockspace
-    ImGuiIO& io = ImGui::GetIO();
-    ImGuiID dockspace_id = ImGui::GetID("MainDockspace");
-    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f));
+    // Dockspace (requires ImGui docking branch)
+    // ImGuiIO& io = ImGui::GetIO();
+    // ImGuiID dockspace_id = ImGui::GetID("MainDockspace");
+    // ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f));
     
     // Menu bar
     drawMainWindow();
@@ -377,10 +378,10 @@ void SymbioteGUI::drawChatPanel() {
     ImGui::Begin("Chat", nullptr, ImGuiWindowFlags_NoCollapse);
     
     // Header with status
-    if (engine_ && engine_->isModelLoaded()) {
+    if (engine_) {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "● Model Loaded");
         ImGui::SameLine();
-        ImGui::Text("| Context: %zu / 200,000 tokens", token_sequence_.size());
+        ImGui::Text("| Context: %zu / 200,000 tokens", chat_history_.size() * 100); // Placeholder
     } else {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "● No Model");
     }
@@ -581,8 +582,9 @@ void SymbioteGUI::drawPackVisualizer() {
     ImGui::Text("VRAM (Hot)");
     float vram_used = 8.2f;  // Example values
     float vram_total = 16.0f;
-    ImGui::ProgressBar(vram_used / vram_total, ImVec2(-1, 0), 
-                       fmt::format("{:.1f} GB / {:.1f} GB", vram_used, vram_total).c_str());
+    char vram_label[64];
+    snprintf(vram_label, sizeof(vram_label), "%.1f GB / %.1f GB", vram_used, vram_total);
+    ImGui::ProgressBar(vram_used / vram_total, ImVec2(-1, 0), vram_label);
     
     // Pack list
     for (const auto& pack : pack_status_) {

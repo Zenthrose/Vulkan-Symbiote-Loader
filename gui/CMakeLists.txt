@@ -76,6 +76,8 @@ target_include_directories(symbiote_gui PUBLIC
 # Add ImGui includes from pkg-config if available
 if(IMGUI_FOUND AND IMGUI_INCLUDE_DIRS)
     target_include_directories(symbiote_gui PUBLIC ${IMGUI_INCLUDE_DIRS})
+    # Also add backends subdirectory
+    target_include_directories(symbiote_gui PUBLIC /usr/include/imgui/backends)
 elseif(IMGUI_INCLUDE_DIR)
     target_include_directories(symbiote_gui PUBLIC 
         ${IMGUI_INCLUDE_DIR}
@@ -87,6 +89,8 @@ target_link_libraries(symbiote_gui PUBLIC
     Vulkan::Vulkan
     glfw
     vk_symbiote
+    imgui
+    stb
 )
 
 if(IMGUI_INCLUDE_DIR)

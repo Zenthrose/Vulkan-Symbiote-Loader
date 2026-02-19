@@ -19,6 +19,16 @@ class VulkanSymbioteEngine;
 
 namespace gui {
 
+// Chat message (defined before ChatSession)
+struct ChatMessage {
+    enum Type { USER, ASSISTANT, SYSTEM, ERROR };
+    Type type;
+    std::string content;
+    uint64_t timestamp;
+    uint32_t token_count;
+    float generation_time_ms;
+};
+
 // Chat session for managing conversation
 class ChatSession {
 public:
@@ -63,16 +73,6 @@ struct GUIConfig {
     bool show_token_counter = true;
     bool show_pack_visualizer = true;
     bool enable_drag_drop = true;
-};
-
-// Chat message
-struct ChatMessage {
-    enum Type { USER, ASSISTANT, SYSTEM, ERROR };
-    Type type;
-    std::string content;
-    uint64_t timestamp;
-    uint32_t token_count;
-    float generation_time_ms;
 };
 
 // Drag-drop payload for files/folders
@@ -174,6 +174,9 @@ private:
     std::vector<ChatMessage> chat_history_;
     std::mutex chat_mutex_;
     std::string input_buffer_;
+    std::vector<ChatSession::ContextSegment> context_segments_;
+    uint32_t current_context_tokens_ = 0;
+    std::vector<PackStatusInfo> pack_status_;
     
     // Async generation
     std::thread generation_thread_;

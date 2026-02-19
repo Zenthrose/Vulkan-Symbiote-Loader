@@ -11,8 +11,6 @@
 namespace vk_symbiote {
 namespace gui {
 
-ChatSession::ContextSegment::ContextSegment() = default;
-
 ChatSession::ChatSession() = default;
 
 ChatSession::~ChatSession() = default;
@@ -66,7 +64,7 @@ void ChatSession::addContextSegment(const std::string& label, uint32_t token_cou
     current_tokens_ += token_count;
 }
 
-std::vector<ContextSegment> ChatSession::getContextSegments() const {
+std::vector<ChatSession::ContextSegment> ChatSession::getContextSegments() const {
     return context_segments_;
 }
 
