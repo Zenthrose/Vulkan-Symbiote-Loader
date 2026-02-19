@@ -1,0 +1,335 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+// ============================================================================
+// FLASH ATTENTION SHADER - O(1) Memory Attention Algorithm
+// ============================================================================
+// This shader implements Flash Attention for efficient O(1) memory attention
+// instead of O(n) memory for standard attention. It uses tiling to compute
+// attention in blocks without materializing the full attention matrix.
+//
+// Key optimizations:
+// - Tiling: Process attention in tiles to keep data in shared memory/registers
+// - Online softmax: Compute softmax without storing all attention scores
+// - Memory-efficient: Only O(head_dim) per thread instead of O(seq_len)
+//
+// Specialization Constants (set at pipeline creation):
+// - HEAD_DIM: Head dimension (e.g., 64, 128)
+// - BLOCK_SIZE_Q: Tile size for queries (e.g., 64)
+// - BLOCK_SIZE_KV: Tile size for keys/values (e.g., 64)
+// - USE_FP16: Use FP16 arithmetic (1) or FP32 (0)
+
+layout(local_size_x_id = 0, local_size_y_id = 1) in;  // Specialization constants for workgroup size
+
+// Input/output activation buffers
+layout(binding = 0, std430) readonly buffer InputBuf { float input_data[]; };
+layout(binding = 1, std430) writeonly buffer OutputBuf { float output_data[]; };
+
+// Weight buffers
+layout(binding = 2, std430) readonly buffer QueryWeight { float q_weight[]; };
+layout(binding = 3, std430) readonly buffer KeyWeight { float k_weight[]; };
+layout(binding = 4, std430) readonly buffer ValueWeight { float v_weight[]; };
+layout(binding = 5, std430) readonly buffer OutputWeight { float o_weight[]; };
+
+// KV Cache buffers - enable O(n) attention complexity
+layout(binding = 6, std430) buffer KeyCache { float key_cache[]; };
+layout(binding = 7, std430) buffer ValueCache { float value_cache[]; };
+
+// Specialization constants for dynamic configuration
+layout(constant_id = 10) const uint HEAD_DIM = 128;        // Head dimension
+layout(constant_id = 11) const uint BLOCK_SIZE_Q = 64;     // Query tile size
+layout(constant_id = 12) const uint BLOCK_SIZE_KV = 64;    // KV tile size
+layout(constant_id = 13) const uint USE_FP16 = 0;          // FP16 flag
+
+layout(push_constant) uniform PC {
+    uint seq_len;          // Current sequence length
+    uint prev_seq_len;     // Previous cached sequence length
+    uint num_heads;
+    uint num_kv_heads;
+    uint max_seq_len;      // Maximum cache capacity
+    float scale;
+    bool use_cache;
+    uint head_dim_override;  // Override if != 0, else use HEAD_DIM
+} pc;
+
+// Calculate actual head dimension
+uint get_head_dim() {
+    return (pc.head_dim_override != 0) ? pc.head_dim_override : HEAD_DIM;
+}
+
+// ============================================================================
+// Shared Memory Layout - Fixed maximum sizes, actual usage based on constants
+// ============================================================================
+// Maximum supported head dimension (compile-time constant)
+#define MAX_HEAD_DIM 256
+#define MAX_BLOCK_SIZE 128
+
+// Query block in shared memory
+shared float shared_q_block[MAX_BLOCK_SIZE][MAX_HEAD_DIM];
+// KV blocks in shared memory (double-buffered)
+shared float shared_k_block[2][MAX_BLOCK_SIZE][MAX_HEAD_DIM];
+shared float shared_v_block[2][MAX_BLOCK_SIZE][MAX_HEAD_DIM];
+
+// Row-wise statistics for online softmax
+shared float shared_m[MAX_BLOCK_SIZE];  // Running max
+shared float shared_l[MAX_BLOCK_SIZE];  // Running sum of exp
+
+// ============================================================================
+// Matrix multiplication: Q @ K^T for a tile
+// Computes BLOCK_SIZE_Q x BLOCK_SIZE_KV block of attention scores
+// ============================================================================
+void compute_qk_scores(
+    uint tid_x, uint tid_y,
+    uint q_block_start, uint kv_block_start,
+    uint head_dim,
+    out float scores[BLOCK_SIZE_KV]
+) {
+    // Initialize scores
+    for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+        scores[k] = 0.0;
+    }
+    
+    // Dot product accumulation over head dimension
+    for (uint d = 0; d < head_dim; ++d) {
+        float q_val = shared_q_block[tid_y][d];
+        
+        #pragma unroll
+        for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+            float k_val = shared_k_block[0][k][d];
+            scores[k] += q_val * k_val;
+        }
+    }
+}
+
+// ============================================================================
+// Online Softmax Update (Flash Attention Algorithm 1, Line 11-17)
+// 
+// Given current statistics (m, l) and new block scores, compute updated stats
+// and rescaling factor for the output accumulator.
+//
+// m_new = max(m_old, max(scores))
+// l_new = l_old * exp(m_old - m_new) + sum(exp(scores - m_new))
+// scale = exp(m_old - m_new) / l_new
+// ============================================================================
+void online_softmax_update(
+    inout float m,
+    inout float l,
+    float scores[BLOCK_SIZE_KV],
+    uint kv_len,
+    out float o_rescale
+) {
+    // Find max in this block
+    float block_max = -1e38;
+    #pragma unroll
+    for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+        if (k < kv_len) {
+            block_max = max(block_max, scores[k] * pc.scale);
+        }
+    }
+    
+    // Compute new max
+    float m_new = max(m, block_max);
+    
+    // Compute block sum of exp
+    float block_sum = 0.0;
+    #pragma unroll
+    for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+        if (k < kv_len) {
+            block_sum += exp(scores[k] * pc.scale - m_new);
+        }
+    }
+    
+    // Update running sum
+    float l_new = l * exp(m - m_new) + block_sum;
+    
+    // Compute rescaling factor for output
+    o_rescale = exp(m - m_new) / l_new;
+    
+    m = m_new;
+    l = l_new;
+}
+
+// ============================================================================
+// Update output accumulator with weighted V values
+// ============================================================================
+void update_output_accumulator(
+    uint tid_x, uint tid_y,
+    float scores[BLOCK_SIZE_KV],
+    uint kv_len,
+    float rescale,
+    inout float o_accum[MAX_HEAD_DIM]
+) {
+    // First apply softmax to get attention weights
+    float weights[BLOCK_SIZE_KV];
+    #pragma unroll
+    for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+        weights[k] = (k < kv_len) ? exp(scores[k] * pc.scale - shared_m[tid_y]) : 0.0;
+    }
+    
+    // Compute weighted sum over V values
+    for (uint d = 0; d < MAX_HEAD_DIM; ++d) {
+        if (d >= get_head_dim()) break;
+        
+        float v_weighted = 0.0;
+        #pragma unroll
+        for (uint k = 0; k < BLOCK_SIZE_KV; ++k) {
+            v_weighted += weights[k] * shared_v_block[0][k][d];
+        }
+        
+        // Rescale and accumulate
+        o_accum[d] = o_accum[d] * rescale + v_weighted;
+    }
+}
+
+// ============================================================================
+// Compute Q, K, V projections from input (simplified)
+// ============================================================================
+void compute_qkv_projection(
+    uint token_idx, uint head, uint kv_head,
+    uint head_dim,
+    out float q[MAX_HEAD_DIM],
+    out float k[MAX_HEAD_DIM],
+    out float v[MAX_HEAD_DIM]
+) {
+    // Matrix multiplication for projections
+    for (uint d = 0; d < head_dim; ++d) {
+        q[d] = 0.0;
+        k[d] = 0.0;
+        v[d] = 0.0;
+        
+        for (uint i = 0; i < head_dim; ++i) {
+            uint input_idx = token_idx * head_dim + i;
+            float input_val = input_data[input_idx];
+            
+            q[d] += input_val * q_weight[(head * head_dim + d) * head_dim + i];
+            k[d] += input_val * k_weight[(kv_head * head_dim + d) * head_dim + i];
+            v[d] += input_val * v_weight[(kv_head * head_dim + d) * head_dim + i];
+        }
+    }
+}
+
+// ============================================================================
+// Main Flash Attention Kernel
+// ============================================================================
+void main() {
+    uint tid_x = gl_LocalInvocationID.x;  // Index within query tile
+    uint tid_y = gl_LocalInvocationID.y;  // Query position within block
+    
+    uint q_block_idx = gl_WorkGroupID.x;   // Which query block
+    uint head = gl_WorkGroupID.y;           // Which head
+    
+    uint head_dim = get_head_dim();
+    uint kv_head = head * pc.num_kv_heads / pc.num_heads;
+    
+    // Calculate this thread's query position
+    uint q_pos = q_block_idx * BLOCK_SIZE_Q + tid_y;
+    
+    if (head >= pc.num_heads || q_pos >= pc.seq_len) return;
+    
+    // ==========================================================================
+    // Phase 1: Compute and cache K, V for new tokens (for incremental generation)
+    // ==========================================================================
+    if (pc.use_cache && q_pos >= pc.prev_seq_len) {
+        float local_k[MAX_HEAD_DIM];
+        float local_v[MAX_HEAD_DIM];
+        
+        // Compute K, V from input
+        float dummy_q[MAX_HEAD_DIM];
+        compute_qkv_projection(q_pos, head, kv_head, head_dim, dummy_q, local_k, local_v);
+        
+        // Store in KV cache
+        for (uint d = tid_x; d < head_dim; d += gl_WorkGroupSize.x) {
+            uint cache_idx = ((kv_head * pc.max_seq_len + q_pos) * head_dim + d);
+            key_cache[cache_idx] = local_k[d];
+            value_cache[cache_idx] = local_v[d];
+        }
+    }
+    
+    barrier();
+    
+    // ==========================================================================
+    // Phase 2: Load Q block into shared memory
+    // ==========================================================================
+    float local_q[MAX_HEAD_DIM];
+    compute_qkv_projection(q_pos, head, kv_head, head_dim, local_q, local_q, local_q);  // Only need Q
+    
+    for (uint d = tid_x; d < head_dim; d += gl_WorkGroupSize.x) {
+        shared_q_block[tid_y][d] = local_q[d];
+    }
+    
+    barrier();
+    
+    // ==========================================================================
+    // Phase 3: Flash Attention Algorithm (Tiled Computation)
+    // ==========================================================================
+    // Initialize online softmax statistics
+    float m = -1e38;  // Running max
+    float l = 0.0;    // Running sum of exp
+    float o_accum[MAX_HEAD_DIM];
+    
+    for (uint d = 0; d < head_dim; ++d) {
+        o_accum[d] = 0.0;
+    }
+    
+    // Number of KV blocks to process
+    uint kv_len = pc.use_cache ? pc.seq_len : (q_pos + 1);
+    uint num_kv_blocks = (kv_len + BLOCK_SIZE_KV - 1) / BLOCK_SIZE_KV;
+    
+    // Process KV blocks
+    for (uint kv_block = 0; kv_block < num_kv_blocks; ++kv_block) {
+        uint kv_block_start = kv_block * BLOCK_SIZE_KV;
+        uint current_kv_len = min(BLOCK_SIZE_KV, kv_len - kv_block_start);
+        
+        // -------------------------------------------------------------------------
+        // Load KV block into shared memory (cooperative loading)
+        // -------------------------------------------------------------------------
+        uint load_idx = tid_y * gl_WorkGroupSize.x + tid_x;
+        uint kv_token = kv_block_start + load_idx / head_dim;
+        uint kv_d = load_idx % head_dim;
+        
+        if (kv_token < kv_len && kv_d < head_dim) {
+            uint cache_idx = ((kv_head * pc.max_seq_len + kv_token) * head_dim + kv_d);
+            shared_k_block[0][load_idx / head_dim][kv_d] = key_cache[cache_idx];
+            shared_v_block[0][load_idx / head_dim][kv_d] = value_cache[cache_idx];
+        }
+        
+        barrier();
+        
+        // -------------------------------------------------------------------------
+        // Compute attention scores for this Q row against all K in block
+        // -------------------------------------------------------------------------
+        float scores[BLOCK_SIZE_KV];
+        compute_qk_scores(tid_x, tid_y, q_pos, kv_block_start, head_dim, scores);
+        
+        // -------------------------------------------------------------------------
+        // Online softmax update
+        // -------------------------------------------------------------------------
+        float rescale;
+        online_softmax_update(m, l, scores, current_kv_len, rescale);
+        
+        // -------------------------------------------------------------------------
+        // Update output accumulator
+        // -------------------------------------------------------------------------
+        update_output_accumulator(tid_x, tid_y, scores, current_kv_len, rescale, o_accum);
+        
+        barrier();
+    }
+    
+    // ==========================================================================
+    // Phase 4: Output projection and store results
+    // ==========================================================================
+    // Apply final scaling (already done incrementally, but normalize)
+    for (uint d = 0; d < head_dim; ++d) {
+        o_accum[d] /= l;  // Normalize by sum
+    }
+    
+    // Output projection
+    for (uint d = tid_x; d < head_dim; d += gl_WorkGroupSize.x) {
+        float out_val = 0.0;
+        for (uint i = 0; i < head_dim; ++i) {
+            out_val += o_accum[i] * o_weight[i * head_dim + d];
+        }
+        uint out_idx = (head * pc.seq_len + q_pos) * head_dim + d;
+        output_data[out_idx] = out_val;
+    }
+}

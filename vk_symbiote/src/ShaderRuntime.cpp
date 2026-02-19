@@ -1077,26 +1077,48 @@ Expected<VkShaderModule> ShaderRuntime::compile_compute_shader(const std::string
     return compile_glsl_to_spirv(glsl_source, defines);
 }
 
-// Create specialized pipeline
+// Create specialized pipeline with full Priority 2 constants
 VkPipeline ShaderRuntime::create_specialized_pipeline(VkShaderModule shader_module,
                                                        const ShaderSpecialization& spec) {
+    // Extended specialization data for Priority 2
     std::vector<uint32_t> spec_data = {
-        spec.workgroup_size_x,
-        spec.workgroup_size_y,
-        spec.workgroup_size_z,
-        spec.subgroup_size,
-        spec.use_fp16_math ? 1u : 0u
+        // Constant IDs 0-4: Workgroup and basic settings
+        spec.workgroup_size_x,           // ID 0
+        spec.workgroup_size_y,           // ID 1
+        spec.workgroup_size_z,           // ID 2
+        spec.subgroup_size,              // ID 3
+        spec.use_fp16_math ? 1u : 0u,    // ID 4
+        // Constant IDs 10-13: Head dimension and Flash Attention
+        spec.head_dim,                   // ID 10
+        spec.block_size_q,               // ID 11
+        spec.block_size_kv,              // ID 12
+        spec.use_flash_attention ? 1u : 0u  // ID 13
     };
     
-    VkSpecializationMapEntry entries[5] = {};
+    // Map entries for standard workgroup constants (0-4)
+    VkSpecializationMapEntry entries[9] = {};
     for (uint32_t i = 0; i < 5; ++i) {
         entries[i].constantID = i;
         entries[i].offset = i * sizeof(uint32_t);
         entries[i].size = sizeof(uint32_t);
     }
     
+    // Map entries for head_dim and Flash Attention constants (10-13)
+    entries[5].constantID = 10;
+    entries[5].offset = 5 * sizeof(uint32_t);
+    entries[5].size = sizeof(uint32_t);
+    entries[6].constantID = 11;
+    entries[6].offset = 6 * sizeof(uint32_t);
+    entries[6].size = sizeof(uint32_t);
+    entries[7].constantID = 12;
+    entries[7].offset = 7 * sizeof(uint32_t);
+    entries[7].size = sizeof(uint32_t);
+    entries[8].constantID = 13;
+    entries[8].offset = 8 * sizeof(uint32_t);
+    entries[8].size = sizeof(uint32_t);
+    
     VkSpecializationInfo spec_info = {};
-    spec_info.mapEntryCount = 5;
+    spec_info.mapEntryCount = 9;
     spec_info.pMapEntries = entries;
     spec_info.dataSize = spec_data.size() * sizeof(uint32_t);
     spec_info.pData = spec_data.data();
@@ -1117,6 +1139,65 @@ VkPipeline ShaderRuntime::create_specialized_pipeline(VkShaderModule shader_modu
     VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &pipeline_info, nullptr, &pipeline);
     
     return (result == VK_SUCCESS) ? pipeline : VK_NULL_HANDLE;
+}
+
+// ============================================================================
+// PRIORITY 2: Flash Attention Pipeline - O(1) Memory Attention
+// ============================================================================
+
+VkPipeline ShaderRuntime::get_flash_attention_pipeline(const ShaderSpecialization& spec) {
+    std::string cache_key = "flash_attention_" + 
+                           std::to_string(spec.workgroup_size_x) + "_" +
+                           std::to_string(spec.head_dim) + "_" +
+                           std::to_string(spec.block_size_q) + "_" +
+                           std::to_string(spec.block_size_kv);
+    
+    auto it = named_pipeline_cache_.find(cache_key);
+    if (it != named_pipeline_cache_.end()) {
+        return it->second;
+    }
+    
+    // Load Flash Attention shader from file
+    auto source_result = load_shader_source("flash_attention.comp");
+    if (!source_result.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to load flash_attention shader from file, falling back to standard attention" << std::endl;
+        // Fallback to standard attention
+        return get_attention_pipeline(spec);
+    }
+    
+    auto shader_module = compile_glsl_to_spirv(source_result.value(), {});
+    if (!shader_module.has_value()) {
+        std::cerr << "[ShaderRuntime] Failed to compile flash_attention shader" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    
+    VkPipeline pipeline = create_specialized_pipeline(shader_module.value(), spec);
+    vkDestroyShaderModule(device_, shader_module.value(), nullptr);
+    
+    if (pipeline != VK_NULL_HANDLE) {
+        named_pipeline_cache_[cache_key] = pipeline;
+        std::cout << "[ShaderRuntime] Created Flash Attention pipeline (head_dim=" << spec.head_dim
+                  << ", block_q=" << spec.block_size_q << ", block_kv=" << spec.block_size_kv << ")" << std::endl;
+    }
+    return pipeline;
+}
+
+// Convenience method: Create attention pipeline with specific head dimension
+VkPipeline ShaderRuntime::get_attention_pipeline_with_head_dim(uint32_t head_dim, uint32_t workgroup_size) {
+    ShaderSpecialization spec;
+    spec.workgroup_size_x = workgroup_size;
+    spec.head_dim = head_dim;
+    spec.block_size_q = 64;
+    spec.block_size_kv = 64;
+    
+    // Use Flash Attention for large sequences (head_dim >= 128)
+    if (head_dim >= 128) {
+        spec.use_flash_attention = true;
+        return get_flash_attention_pipeline(spec);
+    } else {
+        spec.use_flash_attention = false;
+        return get_attention_pipeline(spec);
+    }
 }
 
 // Shader pipeline getters - create on demand

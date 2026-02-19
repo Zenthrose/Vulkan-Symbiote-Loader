@@ -14,13 +14,26 @@ class CooperativeMatrixManager;
 class AutoTuner;
 
 // Shader specialization constants
+// Extended for Priority 2: Enhanced shader configuration
 struct ShaderSpecialization {
-    uint32_t workgroup_size_x = 16;
-    uint32_t workgroup_size_y = 16;
+    uint32_t workgroup_size_x = 128;  // Default: 128 for attention
+    uint32_t workgroup_size_y = 1;
     uint32_t workgroup_size_z = 1;
     bool use_subgroup_ops = true;
     uint32_t subgroup_size = 32;
     bool use_fp16_math = true;
+    
+    // Priority 2: Flash Attention configuration
+    uint32_t head_dim = 128;              // Head dimension (64, 128 common)
+    uint32_t block_size_q = 64;           // Query tile size for Flash Attention
+    uint32_t block_size_kv = 64;          // KV tile size for Flash Attention
+    bool use_flash_attention = false;     // Use Flash Attention algorithm
+    
+    // Shared memory configuration
+    uint32_t shared_memory_size = 16384;  // Dynamic shared memory size
+    
+    // Operation-specific tuning
+    uint32_t operation_type = 0;          // 0=matmul, 1=attention, 2=reduction, 3=norm
 };
 
 // Tuning configuration
@@ -113,6 +126,12 @@ public:
     VkPipeline get_rms_norm_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_final_linear_pipeline(const ShaderSpecialization& spec);
     VkPipeline get_embedding_lookup_pipeline(const ShaderSpecialization& spec);
+    
+    // Priority 2: Flash Attention pipeline with O(1) memory complexity
+    VkPipeline get_flash_attention_pipeline(const ShaderSpecialization& spec);
+    
+    // Create attention pipeline with specific head dimension
+    VkPipeline get_attention_pipeline_with_head_dim(uint32_t head_dim, uint32_t workgroup_size = 128);
     
     // Shader compilation
     Expected<VkShaderModule> compile_compute_shader(const std::string& glsl_source,

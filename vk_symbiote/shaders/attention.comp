@@ -1,7 +1,25 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(local_size_x = 128) in;
+// ============================================================================
+// ATTENTION SHADER - Enhanced with Specialization Constants
+// ============================================================================
+// This shader implements standard attention with KV cache support.
+// Enhanced with specialization constants for dynamic configuration.
+//
+// Specialization Constants:
+// - WORKGROUP_SIZE_X: Workgroup size in X dimension (default: 128)
+// - HEAD_DIM: Head dimension for Q/K/V vectors (default: 128)
+// - MAX_HEAD_DIM: Maximum supported head dimension (compile-time)
+// - USE_FP16: Use FP16 arithmetic optimization (1=yes, 0=no)
+
+// Workgroup size specialization constant
+layout(constant_id = 0) const uint WORKGROUP_SIZE_X = 128;
+layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
+
+// Head dimension specialization constant
+layout(constant_id = 1) const uint HEAD_DIM = 128;
+layout(constant_id = 2) const uint USE_FP16 = 0;
 
 // Input/output activation buffers
 layout(binding = 0, std430) readonly buffer InputBuf { float input_data[]; };
@@ -18,39 +36,42 @@ layout(binding = 6, std430) buffer KeyCache { float key_cache[]; };
 layout(binding = 7, std430) buffer ValueCache { float value_cache[]; };
 
 layout(push_constant) uniform PC {
-    uint32_t seq_len;          // Current sequence length
-    uint32_t prev_seq_len;     // Previous cached sequence length (for incremental)
-    uint32_t head_dim;
-    uint32_t num_heads;
-    uint32_t num_kv_heads;
-    uint32_t max_seq_len;      // Maximum cache capacity
+    uint seq_len;          // Current sequence length
+    uint prev_seq_len;     // Previous cached sequence length (for incremental)
+    uint head_dim;         // Runtime head dimension (if 0, use HEAD_DIM constant)
+    uint num_heads;
+    uint num_kv_heads;
+    uint max_seq_len;      // Maximum cache capacity
     float scale;
-    bool use_cache;            // Whether to use KV cache
+    bool use_cache;        // Whether to use KV cache
 } pc;
 
-// Shared memory for Q, K, V - sized for head_dim up to 256
-// LIMITATION: This shader assumes head_dim <= 256
-// For larger head dimensions, increase these arrays or use dynamic shared memory
-shared float shared_q[256];
-shared float shared_k[256];
-shared float shared_v[256];
+// Shared memory sized based on HEAD_DIM specialization constant
+// MAX_HEAD_DIM = 256 provides support for common architectures
+#define MAX_HEAD_DIM 256
 
-// Assert for head dimension - will fail compilation if head_dim > 256
-// In a real implementation, you might want to use specialization constants
-// or dynamic shared memory allocation instead
+shared float shared_q[MAX_HEAD_DIM];
+shared float shared_k[MAX_HEAD_DIM];
+shared float shared_v[MAX_HEAD_DIM];
+
+// Get actual head dimension (use runtime override if provided, else specialization constant)
+uint get_head_dim() {
+    return (pc.head_dim != 0) ? pc.head_dim : HEAD_DIM;
+}
 
 // Compute Q, K, V projections from input
-void compute_qkv(uint32_t token_idx, uint32_t head, uint32_t kv_head, 
-                 uint32_t head_size, out float q[128], out float k[128], out float v[128]) {
+void compute_qkv(uint token_idx, uint head, uint kv_head, 
+                 uint head_size, out float q[MAX_HEAD_DIM], 
+                 out float k[MAX_HEAD_DIM], out float v[MAX_HEAD_DIM]) {
     // Simple matrix multiplication for Q, K, V projections
     // In production, this should use proper matmul
-    for (uint32_t d = 0; d < head_size; ++d) {
+    for (uint d = 0; d < head_size; ++d) {
         q[d] = 0.0;
         k[d] = 0.0;
         v[d] = 0.0;
         
-        for (uint32_t i = 0; i < head_size; ++i) {
-            uint32_t input_idx = token_idx * head_size + i;
+        for (uint i = 0; i < head_size; ++i) {
+            uint input_idx = token_idx * head_size + i;
             float input_val = input_data[input_idx];
             
             q[d] += input_val * q_weight[(head * head_size + d) * head_size + i];
@@ -61,49 +82,51 @@ void compute_qkv(uint32_t token_idx, uint32_t head, uint32_t kv_head,
 }
 
 void main() {
-    uint32_t gid = gl_GlobalInvocationID.x;
-    uint32_t head = gid / pc.seq_len;
-    uint32_t pos = gid % pc.seq_len;
+    uint gid = gl_GlobalInvocationID.x;
+    uint head = gid / pc.seq_len;
+    uint pos = gid % pc.seq_len;
     
     if (head >= pc.num_heads || pos >= pc.seq_len) return;
     
-    uint32_t head_size = pc.head_dim;
-    uint32_t kv_head = head * pc.num_kv_heads / pc.num_heads;
+    uint head_size = get_head_dim();
+    uint kv_head = head * pc.num_kv_heads / pc.num_heads;
     
     // For this implementation, we compute QKV for current token
     // In production, Q is computed from current token, K/V use cache + new
-    float local_q[128], local_k[128], local_v[128];
+    float local_q[MAX_HEAD_DIM];
+    float local_k[MAX_HEAD_DIM];
+    float local_v[MAX_HEAD_DIM];
     compute_qkv(pos, head, kv_head, head_size, local_q, local_k, local_v);
     
     // Store K, V in cache for future tokens
     if (pc.use_cache) {
-        for (uint32_t d = 0; d < head_size; ++d) {
-            uint32_t cache_idx = ((kv_head * pc.max_seq_len + pos) * head_size + d);
+        for (uint d = 0; d < head_size; ++d) {
+            uint cache_idx = ((kv_head * pc.max_seq_len + pos) * head_size + d);
             key_cache[cache_idx] = local_k[d];
             value_cache[cache_idx] = local_v[d];
         }
     }
     
     // Load Q to shared memory
-    for (uint32_t d = gl_LocalInvocationID.x; d < head_size; d += gl_WorkGroupSize.x) {
+    for (uint d = gl_LocalInvocationID.x; d < head_size; d += WORKGROUP_SIZE_X) {
         shared_q[d] = local_q[d];
     }
     barrier();
     
     // O(n) attention: only attend to cached positions up to current position
     // For incremental generation, this is O(prev_seq_len) instead of O(seq_len²)
-    uint32_t attend_len = pc.use_cache ? pc.seq_len : pos + 1;
+    uint attend_len = pc.use_cache ? pc.seq_len : pos + 1;
     
     // First pass: compute max score for numerical stability
     float max_score = -1e20;
-    for (uint32_t k_pos = 0; k_pos < attend_len; ++k_pos) {
+    for (uint k_pos = 0; k_pos < attend_len; ++k_pos) {
         float score = 0.0;
         
         // Load K from cache or compute
-        for (uint32_t d = 0; d < head_size; ++d) {
+        for (uint d = 0; d < head_size; ++d) {
             float k_val;
             if (pc.use_cache) {
-                uint32_t cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
+                uint cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
                 k_val = key_cache[cache_idx];
             } else {
                 // Would need to recompute K here in non-cached mode
@@ -116,12 +139,12 @@ void main() {
     
     // Second pass: compute softmax sum
     float sum = 0.0;
-    for (uint32_t k_pos = 0; k_pos < attend_len; ++k_pos) {
+    for (uint k_pos = 0; k_pos < attend_len; ++k_pos) {
         float score = 0.0;
-        for (uint32_t d = 0; d < head_size; ++d) {
+        for (uint d = 0; d < head_size; ++d) {
             float k_val;
             if (pc.use_cache) {
-                uint32_t cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
+                uint cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
                 k_val = key_cache[cache_idx];
             } else {
                 k_val = local_k[d];
@@ -132,31 +155,31 @@ void main() {
     }
     
     // Third pass: compute weighted sum of values
-    float result[128];
-    for (uint32_t d = 0; d < head_size; ++d) {
+    float result[MAX_HEAD_DIM];
+    for (uint d = 0; d < head_size; ++d) {
         result[d] = 0.0;
     }
     
-    for (uint32_t k_pos = 0; k_pos < attend_len; ++k_pos) {
+    for (uint k_pos = 0; k_pos < attend_len; ++k_pos) {
         float score = 0.0;
-        float k_val_local[128];
         
-        for (uint32_t d = 0; d < head_size; ++d) {
+        for (uint d = 0; d < head_size; ++d) {
+            float k_val;
             if (pc.use_cache) {
-                uint32_t cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
-                k_val_local[d] = key_cache[cache_idx];
+                uint cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
+                k_val = key_cache[cache_idx];
             } else {
-                k_val_local[d] = local_k[d];
+                k_val = local_k[d];
             }
-            score += shared_q[d] * k_val_local[d];
+            score += shared_q[d] * k_val;
         }
         
         float attn = exp(score * pc.scale - max_score) / sum;
         
-        for (uint32_t d = 0; d < head_size; ++d) {
+        for (uint d = 0; d < head_size; ++d) {
             float v_val;
             if (pc.use_cache) {
-                uint32_t cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
+                uint cache_idx = ((kv_head * pc.max_seq_len + k_pos) * head_size + d);
                 v_val = value_cache[cache_idx];
             } else {
                 v_val = local_v[d];
@@ -166,12 +189,12 @@ void main() {
     }
     
     // Apply output projection
-    for (uint32_t d = gl_LocalInvocationID.x; d < head_size; d += gl_WorkGroupSize.x) {
+    for (uint d = gl_LocalInvocationID.x; d < head_size; d += WORKGROUP_SIZE_X) {
         float out_val = 0.0;
-        for (uint32_t i = 0; i < head_size; ++i) {
+        for (uint i = 0; i < head_size; ++i) {
             out_val += result[i] * o_weight[i * head_size + d];
         }
-        uint32_t out_idx = (head * pc.seq_len + pos) * head_size + d;
+        uint out_idx = (head * pc.seq_len + pos) * head_size + d;
         output_data[out_idx] = out_val;
     }
 }

@@ -108,6 +108,7 @@ set(ENGINE_SOURCES
     src/Utils.cpp
     src/ConfigManager.cpp
     src/GGUFLoader.cpp
+    src/Validation.cpp
 )
 
 set(ENGINE_HEADERS
@@ -120,6 +121,7 @@ set(ENGINE_HEADERS
     include/vk_symbiote/GGUFLoader.h
     include/vk_symbiote/Utils.h
     include/vk_symbiote/ConfigManager.h
+    include/vk_symbiote/Validation.h
 )
 
 add_library(vk_symbiote STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
