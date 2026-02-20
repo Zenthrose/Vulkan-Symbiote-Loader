@@ -838,6 +838,10 @@ void SymbioteGUI::drawMainWindow() {
 }
 
 void SymbioteGUI::drawChatPanel() {
+    // Position and size the chat window explicitly
+    ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+    
     ImGui::Begin("Chat", nullptr, ImGuiWindowFlags_NoCollapse);
     
     // Header with status - make it very prominent
@@ -941,6 +945,10 @@ void SymbioteGUI::drawChatPanel() {
 }
 
 void SymbioteGUI::drawControlPanel() {
+    // Position control panel on the right side
+    ImGui::SetNextWindowPos(ImVec2(640, 80), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(300, 500), ImGuiCond_FirstUseEver);
+    
     ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoCollapse);
     
     // Quick actions
