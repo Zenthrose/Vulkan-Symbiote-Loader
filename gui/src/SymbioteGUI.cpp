@@ -838,29 +838,24 @@ void SymbioteGUI::drawMainWindow() {
 }
 
 void SymbioteGUI::drawChatPanel() {
-    // Position and size the chat window explicitly
-    ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+    // Position and size the chat window explicitly - always reset position
+    ImGui::SetNextWindowPos(ImVec2(50, 100), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_Always);
     
-    ImGui::Begin("Chat", nullptr, ImGuiWindowFlags_NoCollapse);
-    
-    // Header with status - make it very prominent
-    ImGui::PushStyleColor(ImGuiCol_Text, engine_ ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 128, 0, 255));
-    if (engine_) {
-        ImGui::Text("● MODEL LOADED - Ready to chat!");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Model is loaded and ready for inference");
-        }
-    } else {
-        ImGui::Text("● NO MODEL - Please load a model first (File > Open Model)");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Click File menu and select 'Open Model' to load a GGUF file");
-        }
+    if (!ImGui::Begin("Chat", nullptr)) {
+        // Window not visible, skip
+        return;
     }
-    ImGui::PopStyleColor();
+    
+    // Header with status
+    if (engine_) {
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "● MODEL LOADED - Ready to chat!");
+    } else {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "● NO MODEL - Please load a model");
+    }
     
     ImGui::SameLine();
-    ImGui::Text("| Messages: %zu", chat_history_.size());
+    ImGui::Text(" | Messages: %zu", chat_history_.size());
     
     ImGui::Separator();
     
