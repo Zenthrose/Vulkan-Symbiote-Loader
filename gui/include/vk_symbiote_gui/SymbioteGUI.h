@@ -65,13 +65,13 @@ private:
 
 // GUI Configuration
 struct GUIConfig {
-    bool enable_tutorial = true;
+    bool enable_tutorial = false;
     bool auto_load_last_model = false;
     std::string last_model_path;
     std::string theme = "dark";  // dark, light, system
     int font_size = 16;
     bool show_token_counter = true;
-    bool show_pack_visualizer = true;
+    bool show_pack_visualizer = false;
     bool enable_drag_drop = true;
 };
 

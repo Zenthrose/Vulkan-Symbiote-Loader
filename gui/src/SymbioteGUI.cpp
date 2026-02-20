@@ -689,34 +689,10 @@ void SymbioteGUI::run() {
 }
 
 void SymbioteGUI::processUI() {
-    // Main dockspace
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->Pos);
-    ImGui::SetNextWindowSize(viewport->Size);
-    // ImGui::SetNextWindowViewport(viewport->ID); // Requires viewport API
-    
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar;
-    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
-    window_flags |= ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-    
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    
-    ImGui::Begin("MainDockspace", nullptr, window_flags);
-    ImGui::PopStyleVar(2);
-    
-    // Dockspace (requires ImGui docking branch)
-    // ImGuiIO& io = ImGui::GetIO();
-    // ImGuiID dockspace_id = ImGui::GetID("MainDockspace");
-    // ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f));
-    
-    // Menu bar
+    // Menu bar first
     drawMainWindow();
     
-    ImGui::End();
-    
-    // Draw panels
+    // Draw panels - each in its own window
     drawChatPanel();
     drawControlPanel();
     
