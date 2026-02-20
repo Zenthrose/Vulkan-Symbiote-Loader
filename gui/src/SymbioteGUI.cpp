@@ -724,10 +724,30 @@ void SymbioteGUI::run() {
 }
 
 void SymbioteGUI::processUI() {
-    // Menu bar first
+    // Create a fullscreen window to serve as the base for all UI elements
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
+    window_flags |= ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    window_flags |= ImGuiWindowFlags_MenuBar;
+    
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    
+    // This fullscreen window holds the menu bar and provides the base for child windows
+    ImGui::Begin("MainDockspace", nullptr, window_flags);
+    ImGui::PopStyleVar(2);
+    
+    // Menu bar is inside the main window
     drawMainWindow();
     
-    // Draw panels - each in its own window
+    // End the main window but keep child windows visible
+    ImGui::End();
+    
+    // Now draw all panels as floating windows
     drawChatPanel();
     drawControlPanel();
     
