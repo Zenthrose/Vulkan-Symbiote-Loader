@@ -449,6 +449,46 @@ VulkanSymbioteEngine::VulkanSymbioteEngine(const Path& model_path)
               << config_.hidden_size << " hidden size" << std::endl;
 }
 
+// Constructor that uses existing Vulkan objects (for GUI integration)
+VulkanSymbioteEngine::VulkanSymbioteEngine(const Path& model_path,
+                                           VkInstance instance,
+                                           VkPhysicalDevice physical_device,
+                                           VkDevice device,
+                                           VkQueue compute_queue,
+                                           VmaAllocator allocator)
+    : model_path_(model_path),
+      instance_(instance),
+      physical_device_(physical_device),
+      device_(device),
+      compute_queue_(compute_queue),
+      allocator_(allocator),
+      kv_cache_manager_(nullptr),
+      power_manager_(nullptr) {
+
+    // Skip initialize_vulkan() - use provided Vulkan objects
+    // But we still need to set up the rest
+    
+    auto result = load_model();
+    if (!result.has_value()) {
+        throw std::runtime_error("Failed to load model");
+    }
+
+    // Initialize KV cache and power manager
+    kv_cache_manager_ = std::make_unique<KVCacheManager>(config_.num_layers);
+    power_manager_ = std::make_unique<PowerManager>();
+    
+    // Initialize KV cache for all layers
+    uint32_t head_dim = config_.hidden_size / config_.num_attention_heads;
+    for (uint32_t layer = 0; layer < config_.num_layers; ++layer) {
+        kv_cache_manager_->initialize_layer(layer, config_.num_attention_heads, 
+                                           8192, head_dim);  // Max 8K context
+    }
+
+    std::cout << "VulkanSymbioteEngine initialized (using GUI Vulkan): " << config_.model_type 
+              << " " << config_.num_layers << " layers, "
+              << config_.hidden_size << " hidden size" << std::endl;
+}
+
 VulkanSymbioteEngine::~VulkanSymbioteEngine() {
     try {
         // Clear all loaded weights first

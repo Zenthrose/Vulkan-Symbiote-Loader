@@ -1104,15 +1104,15 @@ private:
             case GGUFValueType::FLOAT64:
                 return num_elements * 8;
             case GGUFValueType::Q4_0:
-                return (num_elements / 32) * (4 + 16) + ((num_elements % 32) ? (4 + 16) : 0);
+                return (num_elements / 32) * (2 + 16) + ((num_elements % 32) ? (2 + 16) : 0);
             case GGUFValueType::Q4_1:
-                return (num_elements / 32) * (4 + 4 + 16) + ((num_elements % 32) ? (4 + 4 + 16) : 0);
+                return (num_elements / 32) * (2 + 2 + 16) + ((num_elements % 32) ? (2 + 2 + 16) : 0);
             case GGUFValueType::Q5_0:
-                return (num_elements / 32) * (4 + 20) + ((num_elements % 32) ? (4 + 20) : 0);
+                return (num_elements / 32) * (2 + 20) + ((num_elements % 32) ? (2 + 20) : 0);
             case GGUFValueType::Q5_1:
-                return (num_elements / 32) * (4 + 4 + 20) + ((num_elements % 32) ? (4 + 4 + 20) : 0);
+                return (num_elements / 32) * (2 + 2 + 20) + ((num_elements % 32) ? (2 + 2 + 20) : 0);
             case GGUFValueType::Q8_0:
-                return (num_elements / 32) * (4 + 32) + ((num_elements % 32) ? (4 + 32) : 0);
+                return (num_elements / 32) * (2 + 32) + ((num_elements % 32) ? (2 + 32) : 0);
             default:
                 return num_elements * 4;  // Assume float32 for unknown
         }
@@ -1128,6 +1128,26 @@ private:
 
         const uint8_t* ptr = data.data();
 
+        // Helper: Convert FP16 to FP32
+        auto fp16_to_fp32 = [](uint16_t half) -> float {
+            uint32_t sign = (half >> 15) & 0x1;
+            uint32_t exp = (half >> 10) & 0x1F;
+            uint32_t mantissa = half & 0x3FF;
+            
+            if (exp == 0) {
+                return mantissa == 0 ? 0.0f : std::ldexp((float)mantissa, -24);
+            } else if (exp == 31) {
+                return mantissa == 0 ? 
+                    (sign ? -INFINITY : INFINITY) : 
+                    (sign ? -NAN : NAN);
+            }
+            
+            uint32_t float_bits = (sign << 31) | ((exp + (127 - 15)) << 23) | (mantissa << 13);
+            float f;
+            std::memcpy(&f, &float_bits, sizeof(float));
+            return f;
+        };
+
         switch (info.data_type) {
             case GGUFValueType::Q4_0: {
                 const size_t block_size = 32;
@@ -1135,8 +1155,9 @@ private:
                 const size_t block_bytes = 2 + 16;  // scale (fp16) + quantized values
                 
                 for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
-                    float scale = *reinterpret_cast<const float*>(ptr);
-                    ptr += sizeof(float);
+                    uint16_t scale_bits = *reinterpret_cast<const uint16_t*>(ptr);
+                    float scale = fp16_to_fp32(scale_bits);
+                    ptr += sizeof(uint16_t);
                     
                     for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
                         uint8_t packed = ptr[i];
@@ -1153,13 +1174,15 @@ private:
             case GGUFValueType::Q4_1: {
                 const size_t block_size = 32;
                 const size_t num_blocks = (num_elements + block_size - 1) / block_size;
-                const size_t block_bytes = 4 + 16;  // scale + min + quantized values
+                const size_t block_bytes = 2 + 2 + 16;  // scale + min + quantized values (fp16)
                 
                 for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
-                    float scale = *reinterpret_cast<const float*>(ptr);
-                    ptr += sizeof(float);
-                    float min = *reinterpret_cast<const float*>(ptr);
-                    ptr += sizeof(float);
+                    uint16_t scale_bits = *reinterpret_cast<const uint16_t*>(ptr);
+                    float scale = fp16_to_fp32(scale_bits);
+                    ptr += sizeof(uint16_t);
+                    uint16_t min_bits = *reinterpret_cast<const uint16_t*>(ptr);
+                    float min = fp16_to_fp32(min_bits);
+                    ptr += sizeof(uint16_t);
                     
                     for (size_t i = 0; i < block_size/2 && result.size() < num_elements; ++i) {
                         uint8_t packed = ptr[i];
@@ -1176,11 +1199,12 @@ private:
             case GGUFValueType::Q8_0: {
                 const size_t block_size = 32;
                 const size_t num_blocks = (num_elements + block_size - 1) / block_size;
-                const size_t block_bytes = 2 + 32;  // scale + quantized values
+                const size_t block_bytes = 2 + 32;  // scale (fp16) + quantized values
                 
                 for (size_t b = 0; b < num_blocks && (ptr - data.data() + block_bytes) <= data.size(); ++b) {
-                    float scale = *reinterpret_cast<const float*>(ptr);
-                    ptr += sizeof(float);
+                    uint16_t scale_bits = *reinterpret_cast<const uint16_t*>(ptr);
+                    float scale = fp16_to_fp32(scale_bits);
+                    ptr += sizeof(uint16_t);
                     
                     for (size_t i = 0; i < block_size && result.size() < num_elements; ++i) {
                         int8_t q = static_cast<int8_t>(ptr[i]);

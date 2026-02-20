@@ -72,6 +72,15 @@ struct BenchmarkStats {
 class VulkanSymbioteEngine {
 public:
     VulkanSymbioteEngine(const Path& model_path);
+    
+    // Use existing Vulkan objects (for GUI integration - avoids instance conflict)
+    VulkanSymbioteEngine(const Path& model_path,
+                         VkInstance instance,
+                         VkPhysicalDevice physical_device,
+                         VkDevice device,
+                         VkQueue compute_queue,
+                         VmaAllocator allocator);
+    
     ~VulkanSymbioteEngine();
 
     std::string generate(const std::string& prompt, uint32_t max_tokens = 256, float temperature = 0.7f);
@@ -109,8 +118,8 @@ public:
 
 private:
     VkInstance instance_ = VK_NULL_HANDLE;
-    VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
+    VkDevice device_ = VK_NULL_HANDLE;
     VkQueue compute_queue_ = VK_NULL_HANDLE;
     uint32_t compute_queue_family_ = UINT32_MAX;
     VkCommandPool command_pool_ = VK_NULL_HANDLE;

@@ -186,6 +186,10 @@ void SymbioteGUI::shutdown() {
     if (surface_ != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(instance_, surface_, nullptr);
     }
+    if (allocator_ != nullptr) {
+        vmaDestroyAllocator(allocator_);
+        allocator_ = nullptr;
+    }
     if (device_ != VK_NULL_HANDLE) {
         vkDestroyDevice(device_, nullptr);
     }
@@ -293,15 +297,24 @@ bool SymbioteGUI::createVulkanDevice() {
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &queue_family_count, queue_families.data());
     
     uint32_t graphics_family = UINT32_MAX;
+    uint32_t compute_family = UINT32_MAX;
     for (uint32_t i = 0; i < queue_family_count; i++) {
         if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             VkBool32 present_support = false;
             vkGetPhysicalDeviceSurfaceSupportKHR(physical_device_, i, surface_, &present_support);
             if (present_support) {
                 graphics_family = i;
-                break;
             }
         }
+        // Find a compute queue (can be same as graphics)
+        if ((queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && compute_family == UINT32_MAX) {
+            compute_family = i;
+        }
+    }
+    
+    // Fallback: use graphics family for compute if no separate compute queue
+    if (compute_family == UINT32_MAX) {
+        compute_family = graphics_family;
     }
     
     if (graphics_family == UINT32_MAX) {
@@ -309,20 +322,32 @@ bool SymbioteGUI::createVulkanDevice() {
         return false;
     }
     
-    // Create logical device
+    // Create logical device with both graphics and compute queues
+    std::array<VkDeviceQueueCreateInfo, 2> queue_create_infos = {};
     float queue_priority = 1.0f;
-    VkDeviceQueueCreateInfo queue_create_info = {};
-    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue_create_info.queueFamilyIndex = graphics_family;
-    queue_create_info.queueCount = 1;
-    queue_create_info.pQueuePriorities = &queue_priority;
+    
+    // Graphics queue
+    queue_create_infos[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_infos[0].queueFamilyIndex = graphics_family;
+    queue_create_infos[0].queueCount = 1;
+    queue_create_infos[0].pQueuePriorities = &queue_priority;
+    
+    // Compute queue (if different from graphics)
+    uint32_t queue_count = 1;
+    if (compute_family != graphics_family) {
+        queue_create_infos[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queue_create_infos[1].queueFamilyIndex = compute_family;
+        queue_create_infos[1].queueCount = 1;
+        queue_create_infos[1].pQueuePriorities = &queue_priority;
+        queue_count = 2;
+    }
     
     const char* device_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     
     VkDeviceCreateInfo device_create_info = {};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device_create_info.queueCreateInfoCount = 1;
-    device_create_info.pQueueCreateInfos = &queue_create_info;
+    device_create_info.queueCreateInfoCount = queue_count;
+    device_create_info.pQueueCreateInfos = queue_create_infos.data();
     device_create_info.enabledExtensionCount = 1;
     device_create_info.ppEnabledExtensionNames = device_extensions;
     
@@ -332,6 +357,16 @@ bool SymbioteGUI::createVulkanDevice() {
     }
     
     vkGetDeviceQueue(device_, graphics_family, 0, &graphics_queue_);
+    vkGetDeviceQueue(device_, compute_family, 0, &compute_queue_);
+    
+    // Create VMA allocator
+    VmaAllocatorCreateInfo allocator_info = {};
+    allocator_info.physicalDevice = physical_device_;
+    allocator_info.device = device_;
+    if (vmaCreateAllocator(&allocator_info, &allocator_) != VK_SUCCESS) {
+        std::cerr << "Failed to create VMA allocator" << std::endl;
+        return false;
+    }
     
     // Create command pool
     VkCommandPoolCreateInfo pool_info = {};
@@ -1109,12 +1144,19 @@ bool SymbioteGUI::loadModel(const std::string& path) {
             loading_status_ = "Creating VulkanSymbioteEngine...";
             loading_progress_ = 0.2f;
             
-            // Create new engine with the model path
-            // The engine constructor takes the model path and loads it
+            // Create new engine with the model path, using GUI's existing Vulkan objects
+            // This avoids creating a conflicting Vulkan instance
             try {
-                engine_ = std::make_unique<VulkanSymbioteEngine>(path);
+                engine_ = std::make_unique<VulkanSymbioteEngine>(
+                    path,
+                    instance_,
+                    physical_device_,
+                    device_,
+                    compute_queue_,
+                    allocator_
+                );
                 loading_progress_ = 0.5f;
-                loading_status_ = "Engine created, initializing Vulkan...";
+                loading_status_ = "Engine created, loading GGUF...";
                 
                 // The engine should be ready after construction
                 loading_status_ = "Loading model weights...";
